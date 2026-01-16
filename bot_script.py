@@ -15,63 +15,77 @@ load_dotenv()
 # ==========================================
 # Initial Variables (ดึงค่าจาก .env)
 # ==========================================
-TARGET_URL = os.getenv("TARGET_URL", "http://localhost:3000")
+TARGET_URL = os.getenv("TARGET_URL", "https://test-qeue.onrender.com/")
 TARGET_DATE = os.getenv("TARGET_DATE", "2026-01-16")
 TARGET_DUTY = os.getenv("TARGET_DUTY", "ลบกระดานปิดหน้าต่าง")
 TARGET_NAME = os.getenv("TARGET_NAME", "ต่อ")
 DELAY_SECONDS = int(os.getenv("DELAY_SECONDS", 1))
 
-def run_bot(url=TARGET_URL, date=TARGET_DATE, duty=TARGET_DUTY, name=TARGET_NAME):
-    print(f"🚀 สตาร์ทบอทจองเวรสำหรับ {name}...")
+def run_bot(url=None, date=None, duty=None, name=None):
+    # ใช้ค่าจาก .env ถ้าไม่ได้ระบุ parameter
+    url = url or TARGET_URL
+    date = date or TARGET_DATE
+    duty = duty or TARGET_DUTY
+    name = name or TARGET_NAME
+    
+    print("=" * 50)
+    print("🤖 BOT SCRIPT STARTED")
+    print("=" * 50)
+    print(f"📋 CONFIG FROM .env:")
+    print(f"   🌐 TARGET_URL  = {url}")
+    print(f"   � TARGET_DATE = {date}")
+    print(f"   🧹 TARGET_DUTY = {duty}")
+    print(f"   ✍️  TARGET_NAME = {name}")
+    print(f"   ⏱️  DELAY       = {DELAY_SECONDS}s")
+    print("=" * 50)
+    
+    print("[STEP 1/6] Setting up Chrome Driver...")
     
     # Setup Chrome Driver
     options = webdriver.ChromeOptions()
-    
-    # ตั้งค่าพิเศษเพื่อให้ Browser ไม่ปิดเองทันที และซ่อนแถบควบคุมสถานะบอท
     options.add_experimental_option("detach", True)
     options.add_experimental_option("excludeSwitches", ['enable-automation'])
-    
-    # options.add_argument("--headless") # เปิดทิ้งไว้หากไม่ต้องการให้เห็นหน้าต่าง Browser
+    # options.add_argument("--headless")
     
     try:
-        # พยายามเปิด Driver (เวอร์ชันปกติ)
         driver = webdriver.Chrome(options=options)
-    except Exception:
-        # ถ้าเวอร์ชันไม่ตรง ให้ใช้ ChromeDriverManager ช่วยดาวน์โหลด
-        print("🔧 กำลังอัปเดต ChromeDriver ให้ตรงกับ Browser...")
+        print("[STEP 1/6] ✅ Chrome Driver ready (local)")
+    except Exception as e:
+        print(f"[STEP 1/6] ⚠️ Local driver failed: {e}")
+        print("[STEP 1/6] 🔧 Downloading ChromeDriver via webdriver-manager...")
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
+        print("[STEP 1/6] ✅ Chrome Driver ready (downloaded)")
     
     try:
         # 1. เข้าสู่หน้าเว็บ
-        print(f"🌐 กำลังเปิดเว็บ: {url}")
+        print(f"[STEP 2/6] Opening URL: {url}")
         driver.get(url)
-        
-        # ปรับซูมหน้าเว็บเพื่อให้เห็นข้อมูลครบถ้วน
         driver.execute_script("document.body.style.zoom='70%'")
         time.sleep(DELAY_SECONDS)
+        print("[STEP 2/6] ✅ Page loaded")
         
-        # ส่วนสำหรับการจัดการ iframe
+        # ส่วน iframe (สำหรับ Google Apps Script)
         try:
-             WebDriverWait(driver, 5).until(EC.frame_to_be_available_and_switch_to_it((By.ID, "sandboxFrame")))
-             print("Switched to sandboxFrame")
-             WebDriverWait(driver, 5).until(EC.frame_to_be_available_and_switch_to_it((By.ID, "userHtmlFrame")))
-             print("Switched to userHtmlFrame")
+            WebDriverWait(driver, 5).until(EC.frame_to_be_available_and_switch_to_it((By.ID, "sandboxFrame")))
+            print("[STEP 2/6] Switched to sandboxFrame")
+            WebDriverWait(driver, 5).until(EC.frame_to_be_available_and_switch_to_it((By.ID, "userHtmlFrame")))
+            print("[STEP 2/6] Switched to userHtmlFrame")
         except:
-             pass
+            print("[STEP 2/6] No iframe detected (running on standalone HTML)")
 
         # 2. ป้อนวันที่
-        print(f"📅 ระบุวันที่: {date}")
+        print(f"[STEP 3/6] Setting date: {date}")
         date_input = WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.XPATH, '//*[@id="date"]'))
         )
         driver.execute_script(f"arguments[0].value = '{date}';", date_input)
         driver.execute_script("arguments[0].dispatchEvent(new Event('change'))", date_input)
-        
-        time.sleep(DELAY_SECONDS) 
+        time.sleep(DELAY_SECONDS)
+        print("[STEP 3/6] ✅ Date set")
         
         # 3. เลือกหน้าที่
-        print(f"🧹 เลือกหน้าที่: {duty}")
+        print(f"[STEP 4/6] Selecting duty: {duty}")
         duty_select_elem = WebDriverWait(driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, '//*[@id="duty"]'))
         )
@@ -83,38 +97,37 @@ def run_bot(url=TARGET_URL, date=TARGET_DATE, duty=TARGET_DUTY, name=TARGET_NAME
         select = Select(duty_select_elem)
         try:
             select.select_by_visible_text(duty)
-            print(f"✅ เลือก {duty} สำเร็จ")
+            print(f"[STEP 4/6] ✅ Selected: {duty}")
         except Exception:
-            print(f"❌ ไม่พบหน้าที่ '{duty}' ในรายการเวรที่ว่าง!")
+            print(f"[STEP 4/6] ❌ Duty '{duty}' not found!")
+            available_options = [o.text for o in select.options]
+            print(f"[STEP 4/6] Available options: {available_options}")
             
-            # Fallback logic
+            # Fallback
             fallback_duty = "ลบกระดานปิดหน้าต่าง"
             if duty != fallback_duty:
                 try:
-                    print(f"🔄 พยายามเลือกหน้าที่สำรอง: {fallback_duty}")
+                    print(f"[STEP 4/6] Trying fallback: {fallback_duty}")
                     select.select_by_visible_text(fallback_duty)
-                    print(f"✅ เลือก {fallback_duty} สำเร็จ")
+                    print(f"[STEP 4/6] ✅ Fallback selected: {fallback_duty}")
                 except Exception:
-                    print(f"❌ ไม่พบหน้าที่สำรอง '{fallback_duty}' เช่นกัน")
-                    time.sleep(DELAY_SECONDS)
-                    available_options = [o.text for o in select.options]
-                    print(f"รายการที่ว่างตอนนี้: {available_options}")
-                    return
+                    print(f"[STEP 4/6] ❌ Fallback also failed")
+                    return "FAILED: No available duty"
             else:
-                return
+                return "FAILED: Duty not available"
 
         time.sleep(DELAY_SECONDS)
         
-        # 4. กรอกชื่อผู้จอง
-        print(f"✍️ กรอกชื่อ: {name}")
+        # 4. กรอกชื่อ
+        print(f"[STEP 5/6] Entering name: {name}")
         name_input = driver.find_element(By.XPATH, '//*[@id="name"]')
         name_input.clear()
         name_input.send_keys(name)
-        
         time.sleep(DELAY_SECONDS)
+        print("[STEP 5/6] ✅ Name entered")
         
         # 5. กดปุ่มบันทึก
-        print("🚀 กำลังส่งข้อมูล (กดปุ่มบันทึก)...")
+        print("[STEP 6/6] Clicking submit button...")
         submit_btn = driver.find_element(By.XPATH, '//*[@id="submitBtn"]')
         submit_btn.click()
         
@@ -123,18 +136,22 @@ def run_bot(url=TARGET_URL, date=TARGET_DATE, duty=TARGET_DUTY, name=TARGET_NAME
             success_msg = WebDriverWait(driver, 10).until(
                 EC.visibility_of_element_located((By.CLASS_NAME, "success"))
             )
-            print(f"🎉 บรรลุเป้าหมาย: {success_msg.text}")
+            print(f"[STEP 6/6] 🎉 SUCCESS: {success_msg.text}")
+            return f"SUCCESS: {success_msg.text}"
         except:
-            print("⚠️ ไม่ได้รับข้อความยืนยันจากหน้าเว็บ (อาจจะช้าหรือมีปัญหา)")
-            
-        print("🏁 จบการทำงาน (Browser จะเปิดค้างไว้ตามที่ตั้งค่า detach)")
+            print("[STEP 6/6] ⚠️ No success message detected")
+            return "UNKNOWN: No success message"
 
     except Exception as e:
-        print(f"❌ เกิดข้อผิดพลาดระหว่างรันบอท: {e}")
+        print(f"[ERROR] ❌ Bot crashed: {e}")
+        return f"ERROR: {e}"
     finally:
-        print("🏁 จบการทำงาน ปิด Browser...")
-        time.sleep(5)
+        print("=" * 50)
+        print("🏁 BOT SCRIPT FINISHED")
+        print("=" * 50)
+        time.sleep(3)
         driver.quit()
 
 if __name__ == "__main__":
-    run_bot()
+    result = run_bot()
+    print(f"\n📊 FINAL RESULT: {result}")
