@@ -1,11 +1,10 @@
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 import datetime
 import asyncio
 import os
 from dotenv import load_dotenv
-from bot_script import run_bot
 
 # โหลด Token จากไฟล์ .env
 load_dotenv()
@@ -27,54 +26,103 @@ bot = MyBot()
 async def on_ready():
     print(f"🤖 Discord Bot is ready as {bot.user}")
 
+def format_countdown(seconds):
+    """แปลงวินาทีเป็นรูปแบบ ชม:นาที:วินาที"""
+    hours, remainder = divmod(int(seconds), 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours} ชั่วโมง {minutes} นาที {secs} วินาที"
+    elif minutes > 0:
+        return f"{minutes} นาที {secs} วินาที"
+    else:
+        return f"{secs} วินาที"
+
 @bot.tree.command(name="queue", description="สั่งจองเวรล่วงหน้าตามเวลาที่กำหนด")
-@app_commands.describe(time_str="เวลาที่จะให้บอทเริ่มรัน (HH:MM เช่น 08:30)", 
-                       duty="ชื่อหน้าที่ (เว้นว่างไว้ถ้าจะใช้ค่าเริ่มต้น)",
-                       name="ชื่อผู้จอง (เว้นว่างไว้ถ้าจะใช้ค่าจากสคริปต์)")
-async def queue(interaction: discord.Interaction, time_str: str, duty: str = None, name: str = None):
+@app_commands.describe(time_str="เวลาที่จะให้บอทเริ่มรัน (HH:MM เช่น 08:30)")
+async def queue(interaction: discord.Interaction, time_str: str):
     try:
         # ตรวจสอบรูปแบบเวลา HH:MM
         target_time = datetime.datetime.strptime(time_str, "%H:%M").time()
         now = datetime.datetime.now()
         target_datetime = datetime.datetime.combine(now.date(), target_time)
 
-        # ถ้าเวลาที่ระบุผ่านมาแล้ว ให้ไปรันวันพรุ่งนี้แทน (หรือแจ้งเตือน)
-        if target_datetime < now:
-            await interaction.response.send_message(f"⚠️ เวลา {time_str} ผ่านมาแล้วนะ! กรุณาระบุเวลาในอนาคต", ephemeral=True)
-            return
+        # ถ้าเวลาที่ระบุผ่านมาแล้ว ให้ตั้งเป็นวันพรุ่งนี้
+        if target_datetime <= now:
+            target_datetime += datetime.timedelta(days=1)
+            day_text = "พรุ่งนี้"
+        else:
+            day_text = "วันนี้"
 
         wait_seconds = (target_datetime - now).total_seconds()
+        countdown_text = format_countdown(wait_seconds)
         
-        msg = f"✅ ตั้งเวลาสำเร็จ! บอทจะเริ่มทำงานตอน **{time_str}**"
-        if duty: msg += f"\n🧹 หน้าที่: {duty}"
-        if name: msg += f"\n✍️ ชื่อ: {name}"
+        # ดึงค่าจาก .env (ผ่าน bot_script)
+        from bot_script import TARGET_URL, TARGET_DATE, TARGET_DUTY, TARGET_NAME
         
-        await interaction.response.send_message(msg)
+        msg_content = (
+            f"✅ **ตั้งเวลาสำเร็จ!**\n"
+            f"📅 บอทจะเริ่มทำงาน{day_text}เวลา **{time_str}**\n"
+            f"⏳ นับถอยหลัง: **{countdown_text}**\n\n"
+            f"📋 **ข้อมูลจาก .env:**\n"
+            f"🌐 URL: `{TARGET_URL}`\n"
+            f"📆 วันที่: `{TARGET_DATE}`\n"
+            f"🧹 หน้าที่: `{TARGET_DUTY}`\n"
+            f"✍️ ชื่อ: `{TARGET_NAME}`"
+        )
+        
+        await interaction.response.send_message(msg_content)
+        
+        # ดึงข้อความที่ส่งไว้เพื่ออัปเดต
+        message = await interaction.original_response()
 
-        # รอจนกว่าจะถึงเวลา
-        print(f"⏳ Waiting {wait_seconds:.0f} seconds until {time_str}...")
-        await asyncio.sleep(wait_seconds)
+        # อัปเดตนับถอยหลังทุกๆ 5 วินาที (หรือทุก 1 นาทีถ้าเหลือเยอะ)
+        update_interval = 60 if wait_seconds > 300 else 5
+        
+        while wait_seconds > 0:
+            await asyncio.sleep(min(update_interval, wait_seconds))
+            now = datetime.datetime.now()
+            wait_seconds = (target_datetime - now).total_seconds()
+            
+            if wait_seconds <= 0:
+                break
+                
+            countdown_text = format_countdown(wait_seconds)
+            msg_content = (
+                f"✅ **ตั้งเวลาสำเร็จ!**\n"
+                f"📅 บอทจะเริ่มทำงาน{day_text}เวลา **{time_str}**\n"
+                f"⏳ นับถอยหลัง: **{countdown_text}**\n\n"
+                f"📋 **ข้อมูลจาก .env:**\n"
+                f"🌐 URL: `{TARGET_URL}`\n"
+                f"📆 วันที่: `{TARGET_DATE}`\n"
+                f"🧹 หน้าที่: `{TARGET_DUTY}`\n"
+                f"✍️ ชื่อ: `{TARGET_NAME}`"
+            )
+            try:
+                await message.edit(content=msg_content)
+            except:
+                pass  # ถ้า edit ไม่ได้ก็ข้ามไป
 
-        # เริ่มรันบอท
+        # ถึงเวลาแล้ว! อัปเดตข้อความ
+        await message.edit(content=f"🚀 **ถึงเวลาแล้ว!** กำลังเริ่มรันบอท...")
+        
         print("🚀 Starting bot execution...")
-        # เราดึงค่าเริ่มต้นจากใน bot_script มาใช้ถ้าผู้ใช้ไม่ได้ระบุเพิ่ม
-        from bot_script import TARGET_DUTY, TARGET_NAME
-        final_duty = duty if duty else TARGET_DUTY
-        final_name = name if name else TARGET_NAME
         
-        # รัน Selenium (หมายเหตุ: บอทดิสคอร์ดจะค้างจนกว่าบอทเซเลเนียมจะจบ ถ้าไม่รันแบบ Thread/Subprocess)
-        # แต่เนื่องจากเราต้องการความง่าย เราจะรันท่านี้ก่อน
+        # Import และรันบอทโดยใช้ค่าจาก .env (ผ่าน default ของ run_bot)
+        from bot_script import run_bot
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, run_bot, "http://localhost:3000", now.strftime("%Y-%m-%d"), final_duty, final_name)
+        await loop.run_in_executor(None, run_bot)
 
-        # แจ้งผลทาง Discord (ตัวอย่าง)
+        # แจ้งผลทาง Discord
         channel = interaction.channel
-        await channel.send(f"🏁 บอทรันเสร็จเรียบร้อยแล้วสำหรับเวลา {time_str}!")
+        await channel.send(f"🏁 **บอทรันเสร็จเรียบร้อยแล้ว!**\nตั้งเวลาไว้ที่ {time_str}")
 
     except ValueError:
         await interaction.response.send_message("❌ รูปแบบเวลาไม่ถูกต้อง! กรุณาใช้ HH:MM (เช่น 08:00)", ephemeral=True)
     except Exception as e:
-        await interaction.response.send_message(f"❌ เกิดข้อผิดพลาด: {str(e)}", ephemeral=True)
+        try:
+            await interaction.response.send_message(f"❌ เกิดข้อผิดพลาด: {str(e)}", ephemeral=True)
+        except:
+            print(f"❌ Error: {e}")
 
 if __name__ == "__main__":
     if not TOKEN:

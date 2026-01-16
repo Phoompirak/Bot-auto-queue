@@ -330,20 +330,17 @@
     </div>
 
     <script>
-        // Mock data structure in LocalStorage:
-        // key: 'reservations'
-        // value: JSON array of objects { date: 'YYYY-MM-DD', duty: 'Duty Name', name: 'User Name', timestamp: '...' }
+        // ==========================================
+        // ⚠️ ใส่ URL ของ Google Apps Script Web App ที่นี่
+        // ==========================================
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwFr_lxxl02qV2Cpqk1Tic03gybIUt81rfRtJO7FLzQKNlJeUtNg7L1yUQ6Var-7-Qh/exec";
+        // ตัวอย่าง: const APPS_SCRIPT_URL = "https://script.google.com/macros/s/XXXXXXX/exec";
 
         window.onload = function () {
-            // ตั้งค่าวันที่เริ่มต้นเป็นวันนี้ในรูปแบบ YYYY-MM-DD (สำหรับ input type="date")
             const today = new Date().toISOString().split('T')[0];
-
             const dateInput = document.getElementById('date');
             dateInput.value = today;
-
-            // ล็อควันที่ (ตามคำขอของผู้ใช้: ให้เลือกได้แค่วันเดียวหรือจำกัดช่วง)
             dateInput.setAttribute('min', today);
-            dateInput.setAttribute('max', today);
 
             updateAvailableDuties();
             loadTodayReservations();
@@ -356,15 +353,26 @@
 
         document.getElementById('bookingForm').addEventListener('submit', handleSubmit);
 
-        function getReservations() {
-            return JSON.parse(localStorage.getItem('reservations') || '[]');
+        // ==========================================
+        // ฟังก์ชันเรียก Google Apps Script API
+        // ==========================================
+        async function callAppsScript(action, params = {}) {
+            const url = new URL(APPS_SCRIPT_URL);
+            url.searchParams.append('action', action);
+            for (const [key, value] of Object.entries(params)) {
+                url.searchParams.append(key, value);
+            }
+
+            try {
+                const response = await fetch(url.toString());
+                return await response.json();
+            } catch (error) {
+                console.error('Error calling Apps Script:', error);
+                return { error: error.message };
+            }
         }
 
-        function saveReservations(reservations) {
-            localStorage.setItem('reservations', JSON.stringify(reservations));
-        }
-
-        function updateAvailableDuties() {
+        async function updateAvailableDuties() {
             const date = document.getElementById('date').value;
             const dutySelect = document.getElementById('duty');
             const options = dutySelect.options;
@@ -375,32 +383,29 @@
             }
 
             dutySelect.disabled = false;
-            const reservations = getReservations();
-            const bookedDuties = reservations
-                .filter(r => r.date === date)
-                .map(r => r.duty);
 
-            // Thursday/Friday Logic (รองรับการรันแบบ Local Test)
+            // เรียก API เพื่อดึงรายการที่ถูกจองแล้ว
+            const result = await callAppsScript('getReservations', { date: date });
+            const bookedDuties = (result.reservations || []).map(r => r.duty);
+
+            // Thursday/Friday Logic
             const dateObj = new Date(date);
-            const day = dateObj.getDay(); // 0=Sun, 4=Thu, 5=Fri
+            const day = dateObj.getDay();
             const isThuFri = (day === 4 || day === 5);
 
             for (let i = 0; i < options.length; i++) {
                 const opt = options[i];
-                if (opt.value === "") continue; // Skip placeholder
+                if (opt.value === "") continue;
 
-                // Reset state
                 opt.disabled = false;
-                opt.textContent = opt.value; // Reset text
+                opt.textContent = opt.value;
 
-                // Check special condition
                 if (isThuFri && (opt.value.includes("กวาดห้อง 4") || opt.value.includes("กวาดห้อง4"))) {
                     opt.disabled = true;
                     opt.textContent = opt.value + " (ไม่เปิดจอง)";
                     continue;
                 }
 
-                // Check booking status
                 if (bookedDuties.includes(opt.value)) {
                     opt.disabled = true;
                     opt.textContent = opt.value + " (ถูกจองแล้ว)";
@@ -408,19 +413,19 @@
             }
         }
 
-        function loadTodayReservations() {
+        async function loadTodayReservations() {
             const date = document.getElementById('date').value;
             const listDiv = document.getElementById('reservationList');
 
             if (!date) return;
 
-            const reservations = getReservations();
-            const todayReservations = reservations.filter(r => r.date === date);
+            const result = await callAppsScript('getReservations', { date: date });
+            const reservations = result.reservations || [];
 
-            if (todayReservations.length === 0) {
+            if (reservations.length === 0) {
                 listDiv.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p>ยังไม่มีการจองในวันนี้</p></div>';
             } else {
-                listDiv.innerHTML = todayReservations.map(r => `
+                listDiv.innerHTML = reservations.map(r => `
               <div class="reservation-item">
                 <span class="duty-name">${r.duty}</span>
                 <span class="booker-name">${r.name}</span>
@@ -429,7 +434,7 @@
             }
         }
 
-        function handleSubmit(e) {
+        async function handleSubmit(e) {
             e.preventDefault();
             const submitBtn = document.getElementById('submitBtn');
             const loading = document.querySelector('.loading');
@@ -447,38 +452,26 @@
             loading.style.display = 'flex';
             hideMessage();
 
-            // Simulate network delay
-            setTimeout(() => {
-                loading.style.display = 'none';
-                submitBtn.disabled = false;
+            // เรียก API เพื่อบันทึกการจอง
+            const result = await callAppsScript('saveReservation', {
+                date: date,
+                duty: duty,
+                name: name
+            });
 
-                const reservations = getReservations();
+            loading.style.display = 'none';
+            submitBtn.disabled = false;
 
-                // Double check duplicate
-                const isDuplicate = reservations.some(r => r.date === date && r.duty === duty);
-                if (isDuplicate) {
-                    showMessage("หน้าที่นี้ถูกจองไปแล้ว กรุณาเลือกใหม่", "error");
-                    updateAvailableDuties();
-                    return;
-                }
-
-                // Save
-                reservations.push({
-                    date: date,
-                    duty: duty,
-                    name: name,
-                    timestamp: new Date().toISOString()
-                });
-                saveReservations(reservations);
-
-                showMessage("บันทึกการจองเรียบร้อย (Local Storage)", "success");
+            if (result.success) {
+                showMessage(result.message || "บันทึกการจองเรียบร้อย!", "success");
                 document.getElementById('name').value = '';
                 document.getElementById('duty').value = '';
-
                 updateAvailableDuties();
                 loadTodayReservations();
-
-            }, 500); // 500ms delay
+            } else {
+                showMessage(result.message || "เกิดข้อผิดพลาด", "error");
+                updateAvailableDuties();
+            }
         }
 
         function showMessage(text, type) {

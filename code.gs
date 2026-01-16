@@ -1,20 +1,49 @@
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('index')
-    .setTitle('ระบบจองเวร 5/1')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+function doGet(e) {
+  const action = e.parameter.action;
+  
+  // ถ้าไม่มี action ให้แสดงหน้า HTML
+  if (!action) {
+    return HtmlService.createHtmlOutputFromFile('index')
+      .setTitle('ระบบจองเวร 5/1')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+  
+  // จัดการ API requests
+  let result = {};
+  
+  switch (action) {
+    case 'getReservations':
+      result = { reservations: getTodayReservations(e.parameter.date) };
+      break;
+    case 'saveReservation':
+      result = saveReservation({
+        date: e.parameter.date,
+        duty: e.parameter.duty,
+        name: e.parameter.name
+      });
+      break;
+    case 'getAvailableDuties':
+      result = { duties: getAvailableDuties(e.parameter.date) };
+      break;
+    default:
+      result = { error: 'Unknown action' };
+  }
+  
+  return ContentService
+    .createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 // รายการหน้าที่ทั้งหมด
 const ALL_DUTIES = [
-  "กวาดห้อง 1",
-  "กวาดห้อง 2",
-  "กวาดห้อง 3",
-  "กวาดห้อง 4",
-  "ถูห้อง 1",
-  "ถูห้อง 2",
-  "เช็ดกระจก",
-  "จัดโต๊ะ",
-  "ทิ้งขยะ"
+  "เทขยะ1",
+  "เทขยะ2",
+  "กวาดห้อง1",
+  "กวาดห้อง2",
+  "กวาดห้อง3",
+  "กวาดห้อง4",
+  "จัดโต๊ะปิดไฟปิดพัดลม",
+  "ลบกระดานปิดหน้าต่าง"
 ];
 
 /**
@@ -22,7 +51,7 @@ const ALL_DUTIES = [
  */
 function isThursdayOrFriday(dateString) {
   const date = new Date(dateString);
-  const day = date.getDay(); // 0 = Sunday, 4 = Thursday, 5 = Friday
+  const day = date.getDay();
   return day === 4 || day === 5;
 }
 
@@ -34,22 +63,19 @@ function getAvailableDuties(dateString) {
   const data = sheet.getDataRange().getValues();
   const bookedDuties = [];
   
-  // เริ่มจากแถวที่ 2 (index 1) เพื่อข้าม header
   for (let i = 1; i < data.length; i++) {
     const rowDate = Utilities.formatDate(new Date(data[i][1]), Session.getScriptTimeZone(), "yyyy-MM-dd");
     if (rowDate === dateString) {
-      bookedDuties.push(data[i][2]); // Duty อยู่ column 3 (index 2)
+      bookedDuties.push(data[i][2]);
     }
   }
   
   const isThuFri = isThursdayOrFriday(dateString);
   
   return ALL_DUTIES.filter(duty => {
-    // เงื่อนไขพิเศษ: กวาดห้อง 4 ไม่ได้ในวันพฤหัส/ศุกร์
-    if (isThuFri && duty === "กวาดห้อง 4") {
+    if (isThuFri && duty.includes("กวาดห้อง4")) {
       return false;
     }
-    // ต้องไม่ถูกจองไปแล้ว
     return !bookedDuties.includes(duty);
   });
 }
@@ -83,7 +109,7 @@ function saveReservation(formData) {
     
     const sheet = getSheet();
     sheet.appendRow([
-      new Date(), // Timestamp
+      new Date(),
       formData.date,
       formData.duty,
       formData.name
@@ -96,7 +122,7 @@ function saveReservation(formData) {
 }
 
 /**
- * ดึงรายการการจองของวันนี้
+ * ดึงรายการการจองของวันที่ระบุ
  */
 function getTodayReservations(dateString) {
   const sheet = getSheet();
