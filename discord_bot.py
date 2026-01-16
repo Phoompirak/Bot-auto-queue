@@ -4,11 +4,15 @@ from discord.ext import commands, tasks
 import datetime
 import asyncio
 import os
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 # โหลด Token จากไฟล์ .env
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+
+# ใช้ Timezone ของไทย (UTC+7)
+THAI_TZ = ZoneInfo("Asia/Bangkok")
 
 class MyBot(commands.Bot):
     def __init__(self):
@@ -16,7 +20,6 @@ class MyBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        # Sync slash commands เมื่อเปิดบอท
         await self.tree.sync()
         print(f"✅ Synced slash commands for {self.user}")
 
@@ -41,10 +44,12 @@ def format_countdown(seconds):
 @app_commands.describe(time_str="เวลาที่จะให้บอทเริ่มรัน (HH:MM เช่น 08:30)")
 async def queue(interaction: discord.Interaction, time_str: str):
     try:
+        # ใช้เวลาไทย (UTC+7)
+        now = datetime.datetime.now(THAI_TZ)
+        
         # ตรวจสอบรูปแบบเวลา HH:MM
         target_time = datetime.datetime.strptime(time_str, "%H:%M").time()
-        now = datetime.datetime.now()
-        target_datetime = datetime.datetime.combine(now.date(), target_time)
+        target_datetime = datetime.datetime.combine(now.date(), target_time, tzinfo=THAI_TZ)
 
         # ถ้าเวลาที่ระบุผ่านมาแล้ว ให้ตั้งเป็นวันพรุ่งนี้
         if target_datetime <= now:
@@ -61,7 +66,7 @@ async def queue(interaction: discord.Interaction, time_str: str):
         
         msg_content = (
             f"✅ **ตั้งเวลาสำเร็จ!**\n"
-            f"📅 บอทจะเริ่มทำงาน{day_text}เวลา **{time_str}**\n"
+            f"📅 บอทจะเริ่มทำงาน{day_text}เวลา **{time_str}** (เวลาไทย)\n"
             f"⏳ นับถอยหลัง: **{countdown_text}**\n\n"
             f"📋 **ข้อมูลจาก .env:**\n"
             f"🌐 URL: `{TARGET_URL}`\n"
@@ -72,7 +77,6 @@ async def queue(interaction: discord.Interaction, time_str: str):
         
         await interaction.response.send_message(msg_content)
         
-        # ดึงข้อความที่ส่งไว้เพื่ออัปเดต
         message = await interaction.original_response()
 
         # อัปเดตนับถอยหลังทุกๆ 5 วินาที (หรือทุก 1 นาทีถ้าเหลือเยอะ)
@@ -80,7 +84,7 @@ async def queue(interaction: discord.Interaction, time_str: str):
         
         while wait_seconds > 0:
             await asyncio.sleep(min(update_interval, wait_seconds))
-            now = datetime.datetime.now()
+            now = datetime.datetime.now(THAI_TZ)
             wait_seconds = (target_datetime - now).total_seconds()
             
             if wait_seconds <= 0:
@@ -89,7 +93,7 @@ async def queue(interaction: discord.Interaction, time_str: str):
             countdown_text = format_countdown(wait_seconds)
             msg_content = (
                 f"✅ **ตั้งเวลาสำเร็จ!**\n"
-                f"📅 บอทจะเริ่มทำงาน{day_text}เวลา **{time_str}**\n"
+                f"📅 บอทจะเริ่มทำงาน{day_text}เวลา **{time_str}** (เวลาไทย)\n"
                 f"⏳ นับถอยหลัง: **{countdown_text}**\n\n"
                 f"📋 **ข้อมูลจาก .env:**\n"
                 f"🌐 URL: `{TARGET_URL}`\n"
@@ -100,21 +104,19 @@ async def queue(interaction: discord.Interaction, time_str: str):
             try:
                 await message.edit(content=msg_content)
             except:
-                pass  # ถ้า edit ไม่ได้ก็ข้ามไป
+                pass
 
-        # ถึงเวลาแล้ว! อัปเดตข้อความ
+        # ถึงเวลาแล้ว!
         await message.edit(content=f"🚀 **ถึงเวลาแล้ว!** กำลังเริ่มรันบอท...")
         
         print("🚀 Starting bot execution...")
         
-        # Import และรันบอทโดยใช้ค่าจาก .env (ผ่าน default ของ run_bot)
         from bot_script import run_bot
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, run_bot)
 
-        # แจ้งผลทาง Discord
         channel = interaction.channel
-        await channel.send(f"🏁 **บอทรันเสร็จเรียบร้อยแล้ว!**\nตั้งเวลาไว้ที่ {time_str}")
+        await channel.send(f"🏁 **บอทรันเสร็จเรียบร้อยแล้ว!**\nตั้งเวลาไว้ที่ {time_str} (เวลาไทย)")
 
     except ValueError:
         await interaction.response.send_message("❌ รูปแบบเวลาไม่ถูกต้อง! กรุณาใช้ HH:MM (เช่น 08:00)", ephemeral=True)
