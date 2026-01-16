@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบจองเวร 5/1</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Kanit', sans-serif;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 500px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            animation: fadeIn 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 32px;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 8px;
+            letter-spacing: -0.025em;
+        }
+
+        .subtitle {
+            text-align: center;
+            font-size: 16px;
+            font-weight: 300;
+            color: #718096;
+            margin-bottom: 32px;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: #4a5568;
+            margin-bottom: 8px;
+        }
+
+        label span {
+            color: #e53e3e;
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 14px 18px;
+            border: 2px solid #edf2f7;
+            background: #f8fafc;
+            border-radius: 12px;
+            font-family: 'Kanit', sans-serif;
+            font-size: 16px;
+            transition: all 0.2s ease;
+            color: #2d3748;
+        }
+
+        input:focus,
+        select:focus {
+            outline: none;
+            background: white;
+            border-color: #667eea;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.15);
+        }
+
+        button {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-family: 'Kanit', sans-serif;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-top: 12px;
+            box-shadow: 0 10px 15px -3px rgba(102, 126, 234, 0.4);
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 20px 25px -5px rgba(102, 126, 234, 0.4);
+            filter: brightness(1.1);
+        }
+
+        button:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .info-box {
+            background: #ebf4ff;
+            border-left: 4px solid #4299e1;
+            padding: 16px;
+            margin-bottom: 24px;
+            border-radius: 12px;
+            font-size: 14px;
+            color: #2c5282;
+            line-height: 1.5;
+        }
+
+        .loading {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 24px;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid rgba(102, 126, 234, 0.2);
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 12px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .message {
+            padding: 16px;
+            margin-top: 24px;
+            border-radius: 12px;
+            text-align: center;
+            display: none;
+            font-size: 15px;
+            font-weight: 500;
+            animation: slideDown 0.4s ease;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .success {
+            background: #f0fff4;
+            color: #276749;
+            border: 1px solid #c6f6d5;
+        }
+
+        .error {
+            background: #fff5f5;
+            color: #9b2c2c;
+            border: 1px solid #fed7d7;
+        }
+
+        .reservations-section {
+            margin-top: 40px;
+            padding-top: 32px;
+            border-top: 2px solid #f7fafc;
+        }
+
+        .section-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .reservation-list {
+            display: grid;
+            gap: 12px;
+        }
+
+        .reservation-item {
+            background: #f8fafc;
+            padding: 14px 18px;
+            border-radius: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.2s ease;
+            border: 1px solid #edf2f7;
+        }
+
+        .reservation-item:hover {
+            background: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            transform: translateX(4px);
+            border-color: #667eea;
+        }
+
+        .duty-name {
+            font-weight: 500;
+            color: #4a5568;
+            font-size: 15px;
+        }
+
+        .booker-name {
+            font-weight: 400;
+            color: #718096;
+            font-size: 14px;
+            background: #edf2f7;
+            padding: 4px 10px;
+            border-radius: 20px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #a0aec0;
+        }
+
+        .empty-state-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>ระบบจองเวร 5/1</h1>
+        <p class="subtitle">จองหน้าที่ประจำวันของคุณ</p>
+
+        <div class="info-box">
+            <strong>📌 หมายเหตุ:</strong><br>
+            กวาดห้อง 4 ไม่สามารถจองได้ในวันพฤหัสบดีและวันศุกร์
+        </div>
+
+        <form id="bookingForm">
+            <div class="form-group">
+                <label for="date">วันที่ <span>*</span></label>
+                <input type="date" id="date" name="date" required>
+            </div>
+
+            <div class="form-group">
+                <label for="duty">หน้าที่ <span>*</span></label>
+                <select id="duty" name="duty" required>
+                    <option value="">-- เลือกหน้าที่ --</option>
+                    <option value="เทขยะ1">เทขยะ1</option>
+                    <option value="เทขยะ2">เทขยะ2</option>
+                    <option value="กวาดห้อง1">กวาดห้อง1</option>
+                    <option value="กวาดห้อง2">กวาดห้อง2</option>
+                    <option value="กวาดห้อง3">กวาดห้อง3</option>
+                    <option value="จัดโต๊ะปิดไฟปิดพัดลม">จัดโต๊ะปิดไฟปิดพัดลม</option>
+                    <option value="ลบกระดานปิดหน้าต่าง">ลบกระดานปิดหน้าต่าง</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="name">ชื่อผู้จอง <span>*</span></label>
+                <input type="text" id="name" name="name" required placeholder="กรอกชื่อ-นามสกุล">
+            </div>
+
+            <button type="submit" id="submitBtn">บันทึกการจอง</button>
+        </form>
+
+        <div class="loading">
+            <div class="spinner"></div>
+            <p>กำลังประมวลผล...</p>
+        </div>
+
+        <div id="message" class="message"></div>
+
+        <div class="reservations-section">
+            <h2 class="section-title">📋 รายการจองวันนี้</h2>
+            <div id="reservationList" class="reservation-list">
+                <div class="empty-state">
+                    <div class="empty-state-icon">⏳</div>
+                    <p>กำลังโหลดข้อมูล...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Mock data structure in LocalStorage:
+        // key: 'reservations'
+        // value: JSON array of objects { date: 'YYYY-MM-DD', duty: 'Duty Name', name: 'User Name', timestamp: '...' }
+
+        window.onload = function () {
+            // ตั้งค่าวันที่เริ่มต้นเป็นวันนี้ในรูปแบบ YYYY-MM-DD (สำหรับ input type="date")
+            const today = new Date().toISOString().split('T')[0];
+
+            const dateInput = document.getElementById('date');
+            dateInput.value = today;
+
+            // ล็อควันที่ (ตามคำขอของผู้ใช้: ให้เลือกได้แค่วันเดียวหรือจำกัดช่วง)
+            dateInput.setAttribute('min', today);
+            dateInput.setAttribute('max', today);
+
+            updateAvailableDuties();
+            loadTodayReservations();
+        };
+
+        document.getElementById('date').addEventListener('change', () => {
+            updateAvailableDuties();
+            loadTodayReservations();
+        });
+
+        document.getElementById('bookingForm').addEventListener('submit', handleSubmit);
+
+        function getReservations() {
+            return JSON.parse(localStorage.getItem('reservations') || '[]');
+        }
+
+        function saveReservations(reservations) {
+            localStorage.setItem('reservations', JSON.stringify(reservations));
+        }
+
+        function updateAvailableDuties() {
+            const date = document.getElementById('date').value;
+            const dutySelect = document.getElementById('duty');
+            const options = dutySelect.options;
+
+            if (!date) {
+                dutySelect.disabled = true;
+                return;
+            }
+
+            dutySelect.disabled = false;
+            const reservations = getReservations();
+            const bookedDuties = reservations
+                .filter(r => r.date === date)
+                .map(r => r.duty);
+
+            // Thursday/Friday Logic (รองรับการรันแบบ Local Test)
+            const dateObj = new Date(date);
+            const day = dateObj.getDay(); // 0=Sun, 4=Thu, 5=Fri
+            const isThuFri = (day === 4 || day === 5);
+
+            for (let i = 0; i < options.length; i++) {
+                const opt = options[i];
+                if (opt.value === "") continue; // Skip placeholder
+
+                // Reset state
+                opt.disabled = false;
+                opt.textContent = opt.value; // Reset text
+
+                // Check special condition
+                if (isThuFri && (opt.value.includes("กวาดห้อง 4") || opt.value.includes("กวาดห้อง4"))) {
+                    opt.disabled = true;
+                    opt.textContent = opt.value + " (ไม่เปิดจอง)";
+                    continue;
+                }
+
+                // Check booking status
+                if (bookedDuties.includes(opt.value)) {
+                    opt.disabled = true;
+                    opt.textContent = opt.value + " (ถูกจองแล้ว)";
+                }
+            }
+        }
+
+        function loadTodayReservations() {
+            const date = document.getElementById('date').value;
+            const listDiv = document.getElementById('reservationList');
+
+            if (!date) return;
+
+            const reservations = getReservations();
+            const todayReservations = reservations.filter(r => r.date === date);
+
+            if (todayReservations.length === 0) {
+                listDiv.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p>ยังไม่มีการจองในวันนี้</p></div>';
+            } else {
+                listDiv.innerHTML = todayReservations.map(r => `
+              <div class="reservation-item">
+                <span class="duty-name">${r.duty}</span>
+                <span class="booker-name">${r.name}</span>
+              </div>
+            `).join('');
+            }
+        }
+
+        function handleSubmit(e) {
+            e.preventDefault();
+            const submitBtn = document.getElementById('submitBtn');
+            const loading = document.querySelector('.loading');
+
+            const date = document.getElementById('date').value;
+            const duty = document.getElementById('duty').value;
+            const name = document.getElementById('name').value;
+
+            if (!duty) {
+                showMessage("กรุณาเลือกหน้าที่", "error");
+                return;
+            }
+
+            submitBtn.disabled = true;
+            loading.style.display = 'flex';
+            hideMessage();
+
+            // Simulate network delay
+            setTimeout(() => {
+                loading.style.display = 'none';
+                submitBtn.disabled = false;
+
+                const reservations = getReservations();
+
+                // Double check duplicate
+                const isDuplicate = reservations.some(r => r.date === date && r.duty === duty);
+                if (isDuplicate) {
+                    showMessage("หน้าที่นี้ถูกจองไปแล้ว กรุณาเลือกใหม่", "error");
+                    updateAvailableDuties();
+                    return;
+                }
+
+                // Save
+                reservations.push({
+                    date: date,
+                    duty: duty,
+                    name: name,
+                    timestamp: new Date().toISOString()
+                });
+                saveReservations(reservations);
+
+                showMessage("บันทึกการจองเรียบร้อย (Local Storage)", "success");
+                document.getElementById('name').value = '';
+                document.getElementById('duty').value = '';
+
+                updateAvailableDuties();
+                loadTodayReservations();
+
+            }, 500); // 500ms delay
+        }
+
+        function showMessage(text, type) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = text;
+            messageDiv.className = 'message ' + type;
+            messageDiv.style.display = 'block';
+            setTimeout(hideMessage, 5000);
+        }
+
+        function hideMessage() {
+            document.getElementById('message').style.display = 'none';
+        }
+    </script>
+</body>
+
+</html>
