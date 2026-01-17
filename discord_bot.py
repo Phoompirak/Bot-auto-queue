@@ -60,17 +60,58 @@ def format_countdown(seconds):
         return f"{hours} ชั่วโมง {minutes} นาที {secs} วินาที"
     elif minutes > 0:
         return f"{minutes} นาที {secs} วินาที"
-    else:
         return f"{secs} วินาที"
 
-@bot.tree.command(name="queue", description="สั่งจองเวรล่วงหน้าตามเวลาที่กำหนด")
-@app_commands.describe(time_str="เวลาที่จะให้บอทเริ่มรัน (HH:MM เช่น 08:30)")
-async def queue(interaction: discord.Interaction, time_str: str):
+@bot.tree.command(name="help-queue", description="ดูวิธีใช้งานบอทจองเวร")
+async def help_queue(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🤖 คู่มือการใช้งานบอทจองเวร",
+        description="วิธีสั่งงานบอทให้จองเวรอัตโนมัติ",
+        color=discord.Color.green()
+    )
+    
+    embed.add_field(
+        name="1. สั่งจองวันนี้/พรุ่งนี้",
+        value="`/queue 08:30`\n(บอทจะเริ่มรันเวลา 08:30 ของวันนี้ หรือพรุ่งนี้ถ้าเลยเวลาแล้ว)",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="2. สั่งจองล่วงหน้า (ระบุวันที่, หน้าที่, ชื่อ)",
+        value="`/queue 08:30` (สามารถเลือก option เสริมได้)\n- `date_str`: ระบุวันที่ (เช่น 21/01/69)\n- `duty_select`: เลือกหน้าที่ (มีให้เลือกในลิสต์)\n- `name_input`: ระบุชื่อคนจอง",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="ℹ️ หมายเหตุ",
+        value="- ถ้าไม่ระบุ `duty` หรือ `name` จะใช้ค่าเริ่มต้นจาก `.env`\n- เมื่อจองเสร็จจะมีรูป Screenshot ส่งมาให้ดู",
+        inline=False
+    )
+    
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="queue", description="สั่งจองเวรล่วงหน้า")
+@app_commands.describe(
+    time_str="เวลาที่จะให้บอทเริ่มรัน (HH:MM เช่น 08:30)",
+    date_str="วันที่ที่จะจอง (dd/mm/yy พ.ศ. เช่น 21/01/69) *ไม่บังคับ",
+    duty_select="เลือกหน้าที่ (ถ้าไม่เลือกจะใช้จาก .env)",
+    name_input="ชื่อคนจอง (ถ้าไม่ใส่จะใช้จาก .env)"
+)
+@app_commands.choices(duty_select=[
+    app_commands.Choice(name="เทขยะ1", value="เทขยะ1"),
+    app_commands.Choice(name="เทขยะ2", value="เทขยะ2"),
+    app_commands.Choice(name="กวาดห้อง1", value="กวาดห้อง1"),
+    app_commands.Choice(name="กวาดห้อง2", value="กวาดห้อง2"),
+    app_commands.Choice(name="กวาดห้อง3", value="กวาดห้อง3"),
+    app_commands.Choice(name="จัดโต๊ะปิดไฟปิดพัดลม", value="จัดโต๊ะปิดไฟปิดพัดลม"),
+    app_commands.Choice(name="ลบกระดานปิดหน้าต่าง", value="ลบกระดานปิดหน้าต่าง")
+])
+async def queue(interaction: discord.Interaction, time_str: str, date_str: str = None, duty_select: app_commands.Choice[str] = None, name_input: str = None):
     try:
         # ใช้เวลาไทย (UTC+7)
         now = datetime.datetime.now(THAI_TZ)
         
-        # ตรวจสอบรูปแบบเวลา HH:MM
+        # 1. คำนวณเวลาที่จะรันบอท (Scheduled Time)
         target_time = datetime.datetime.strptime(time_str, "%H:%M").time()
         target_datetime = datetime.datetime.combine(now.date(), target_time, tzinfo=THAI_TZ)
 
@@ -84,18 +125,52 @@ async def queue(interaction: discord.Interaction, time_str: str):
         wait_seconds = (target_datetime - now).total_seconds()
         countdown_text = format_countdown(wait_seconds)
         
-        # ดึงค่าจาก .env (ผ่าน bot_script)
-        from bot_script import TARGET_URL, TARGET_DATE, TARGET_DUTY, TARGET_NAME
+        # 2. คำนวณวันที่ที่จะจอง (Booking Date)
+        booking_date = ""
+        date_note = ""
+        
+        if date_str:
+            # กรณีระบุวันที่เอง (คาดว่าเป็น พ.ศ. dd/mm/yy)
+            try:
+                parts = date_str.split('/')
+                d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
+                
+                # แปลง พ.ศ. 2 หลัก -> ค.ศ. 4 หลัก
+                if y < 100:
+                    y_ad = 1957 + y
+                elif y > 2400:
+                    y_ad = y - 543
+                else:
+                    y_ad = y # กรณีใส่ 2026 มาตรงๆ
+                
+                # Format เป็น YYYY-MM-DD
+                booking_date_obj = datetime.date(y_ad, m, d)
+                booking_date = booking_date_obj.strftime("%Y-%m-%d")
+                date_note = "(ระบุเอง)"
+            except:
+                await interaction.response.send_message("❌ รูปแบบวันที่ไม่ถูกต้อง! กรุณาใช้ dd/mm/yy (เช่น 21/01/69)", ephemeral=True)
+                return
+        else:
+            # กรณีไม่ระบุ -> ใช้วันเดียวกับที่บอทจะรัน
+            booking_date = target_datetime.strftime("%Y-%m-%d")
+            date_note = f"({day_text})"
+        
+        # ดึงค่า Config อื่นๆ (จาก .env)
+        from bot_script import TARGET_URL, TARGET_DUTY as ENV_DUTY, TARGET_NAME as ENV_NAME, get_today_date, run_bot
+        
+        # ใช้ค่าที่ user เลือก หรือใช้จาก .env ถ้าไม่ได้เลือก
+        final_duty = duty_select.value if duty_select else ENV_DUTY
+        final_name = name_input if name_input else ENV_NAME
         
         msg_content = (
             f"✅ **ตั้งเวลาสำเร็จ!**\n"
             f"📅 บอทจะเริ่มทำงาน{day_text}เวลา **{time_str}** (เวลาไทย)\n"
             f"⏳ นับถอยหลัง: **{countdown_text}**\n\n"
-            f"📋 **ข้อมูลจาก .env:**\n"
+            f"📋 **ข้อมูลที่จะใช้จอง:**\n"
             f"🌐 URL: `{TARGET_URL}`\n"
-            f"📆 วันที่: `{TARGET_DATE}`\n"
-            f"🧹 หน้าที่: `{TARGET_DUTY}`\n"
-            f"✍️ ชื่อ: `{TARGET_NAME}`"
+            f"📆 วันที่ที่จะจอง: `{booking_date}` {date_note}\n"
+            f"🧹 หน้าที่: `{final_duty}`\n"
+            f"✍️ ชื่อ: `{final_name}`"
         )
         
         await interaction.response.send_message(msg_content)
@@ -118,11 +193,11 @@ async def queue(interaction: discord.Interaction, time_str: str):
                 f"✅ **ตั้งเวลาสำเร็จ!**\n"
                 f"📅 บอทจะเริ่มทำงาน{day_text}เวลา **{time_str}** (เวลาไทย)\n"
                 f"⏳ นับถอยหลัง: **{countdown_text}**\n\n"
-                f"📋 **ข้อมูลจาก .env:**\n"
+                f"📋 **ข้อมูลที่จะใช้จอง:**\n"
                 f"🌐 URL: `{TARGET_URL}`\n"
-                f"📆 วันที่: `{TARGET_DATE}`\n"
-                f"🧹 หน้าที่: `{TARGET_DUTY}`\n"
-                f"✍️ ชื่อ: `{TARGET_NAME}`"
+                f"📆 วันที่ที่จะจอง: `{booking_date}` {date_note}\n"
+                f"🧹 หน้าที่: `{final_duty}`\n"
+                f"✍️ ชื่อ: `{final_name}`"
             )
             try:
                 await message.edit(content=msg_content)
@@ -144,9 +219,15 @@ async def queue(interaction: discord.Interaction, time_str: str):
         from bot_script import run_bot
         import functools
         
-        # ใช้ partial เพื่อส่ง callback เข้าไป
+        # ใช้ partial เพื่อส่ง callback และ parameters ต่างๆ เข้าไป
         loop = asyncio.get_event_loop()
-        run_bot_with_callback = functools.partial(run_bot, callback=progress_callback)
+        run_bot_with_callback = functools.partial(
+            run_bot, 
+            date=booking_date, 
+            duty=final_duty, 
+            name=final_name, 
+            callback=progress_callback
+        )
         
         # รันใน Executor เพื่อไม่ให้ Main Loop ค้าง
         result = await loop.run_in_executor(None, run_bot_with_callback)
@@ -167,19 +248,51 @@ async def queue(interaction: discord.Interaction, time_str: str):
             summary = f"❓ **สถานะไม่แน่ชัด**\n📝 {message_text}"
         
         channel = interaction.channel
-        try:
-            # ส่งข้อความพร้อม Screenshot (ถ้ามี)
-            if screenshot_path and os.path.exists(screenshot_path):
-                file = discord.File(screenshot_path, filename="booking_result.png")
-                await channel.send(content=f"🏁 **บอทรันเสร็จแล้ว** (เวลาไทย {time_str})\n\n{summary}", file=file)
-            else:
-                await channel.send(f"🏁 **บอทรันเสร็จแล้ว** (เวลาไทย {time_str})\n\n{summary}\n\n(ไม่สามารถถ่าย Screenshot ได้)")
-        except Exception as send_error:
-            print(f"⚠️ ไม่สามารถส่งข้อความสรุปได้: {send_error}")
+        
+        # Debug: แสดง screenshot path
+        print(f"📸 Screenshot path: {screenshot_path}")
+        if screenshot_path:
+            print(f"📸 File exists: {os.path.exists(screenshot_path)}")
+        
+        # พยายามส่งหลายวิธี
+        sent = False
+        
+        # วิธี 1: ใช้ interaction.followup.send (แนะนำ)
+        if not sent:
             try:
-                await message.edit(content=f"🏁 **บอทรันเสร็จแล้ว!**\n\n{summary}")
-            except:
-                pass
+                if screenshot_path and os.path.exists(screenshot_path):
+                    print(f"📸 Trying followup.send with screenshot...")
+                    file = discord.File(screenshot_path, filename="booking_result.png")
+                    await interaction.followup.send(content=f"🏁 **บอทรันเสร็จแล้ว** (เวลาไทย {time_str})\n\n{summary}", file=file)
+                else:
+                    await interaction.followup.send(f"🏁 **บอทรันเสร็จแล้ว** (เวลาไทย {time_str})\n\n{summary}\n\n(ไม่สามารถถ่าย Screenshot ได้)")
+                sent = True
+                print(f"📸 Sent via followup!")
+            except Exception as e:
+                print(f"⚠️ followup.send failed: {e}")
+        
+        # วิธี 2: ใช้ channel.send
+        if not sent:
+            try:
+                if screenshot_path and os.path.exists(screenshot_path):
+                    print(f"📸 Trying channel.send with screenshot...")
+                    file = discord.File(screenshot_path, filename="booking_result.png")
+                    await channel.send(content=f"🏁 **บอทรันเสร็จแล้ว** (เวลาไทย {time_str})\n\n{summary}", file=file)
+                else:
+                    await channel.send(f"🏁 **บอทรันเสร็จแล้ว** (เวลาไทย {time_str})\n\n{summary}")
+                sent = True
+                print(f"📸 Sent via channel!")
+            except Exception as e:
+                print(f"⚠️ channel.send failed: {e}")
+        
+        # วิธี 3: แก้ไขข้อความเดิม (fallback สุดท้าย - ไม่มีรูป)
+        if not sent:
+            try:
+                print(f"📸 Trying message.edit as last resort...")
+                await message.edit(content=f"🏁 **บอทรันเสร็จแล้ว!**\n\n{summary}\n\n📸 Screenshot: {screenshot_path}")
+                print(f"📸 Updated via message.edit!")
+            except Exception as e:
+                print(f"⚠️ All send methods failed: {e}")
 
     except ValueError:
         await interaction.response.send_message("❌ รูปแบบเวลาไม่ถูกต้อง! กรุณาใช้ HH:MM (เช่น 08:00)", ephemeral=True)

@@ -397,18 +397,23 @@
                 const opt = options[i];
                 if (opt.value === "") continue;
 
+                // Reset ค่า
                 opt.disabled = false;
+                opt.hidden = false;
                 opt.textContent = opt.value;
+                opt.style.display = "";
 
+                // กวาดห้อง 4 ไม่เปิดจองวันพฤหัส/ศุกร์
                 if (isThuFri && (opt.value.includes("กวาดห้อง 4") || opt.value.includes("กวาดห้อง4"))) {
-                    opt.disabled = true;
-                    opt.textContent = opt.value + " (ไม่เปิดจอง)";
+                    opt.hidden = true;
+                    opt.style.display = "none";
                     continue;
                 }
 
+                // ถ้าถูกจองแล้ว ให้ซ่อนไปเลย
                 if (bookedDuties.includes(opt.value)) {
-                    opt.disabled = true;
-                    opt.textContent = opt.value + " (ถูกจองแล้ว)";
+                    opt.hidden = true;
+                    opt.style.display = "none";
                 }
             }
         }

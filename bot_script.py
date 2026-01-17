@@ -7,6 +7,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 import time
 import os
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Load .env file
@@ -16,10 +17,13 @@ load_dotenv()
 # Initial Variables (ดึงค่าจาก .env)
 # ==========================================
 TARGET_URL = os.getenv("TARGET_URL", "https://test-qeue.onrender.com/")
-TARGET_DATE = os.getenv("TARGET_DATE", "2026-01-16")
 TARGET_DUTY = os.getenv("TARGET_DUTY", "ลบกระดานปิดหน้าต่าง")
 TARGET_NAME = os.getenv("TARGET_NAME", "ต่อ")
 DELAY_SECONDS = int(os.getenv("DELAY_SECONDS", 1))
+
+def get_today_date():
+    """คืนค่าวันที่ปัจจุบันในรูปแบบ YYYY-MM-DD"""
+    return datetime.now().strftime("%Y-%m-%d")
 
 def run_bot(url=None, date=None, duty=None, name=None, callback=None):
     # Helper to log to both console and callback
@@ -33,7 +37,8 @@ def run_bot(url=None, date=None, duty=None, name=None, callback=None):
 
     # ใช้ค่าจาก .env ถ้าไม่ได้ระบุ parameter
     url = url or TARGET_URL
-    date = date or TARGET_DATE
+    # ถ้าไม่ได้ระบุวันที่ (None) ให้ใช้วันที่ปัจจุบัน
+    date = date or get_today_date()
     duty = duty or TARGET_DUTY
     name = name or TARGET_NAME
     
@@ -164,11 +169,24 @@ def run_bot(url=None, date=None, duty=None, name=None, callback=None):
             except:
                 log("[STEP 6/6] ⚠️ No success/error message detected")
         
-        # 7. Reload หน้าเว็บ และ Capture Screenshot
-        log("[STEP 7/7] Reloading page and capturing screenshot...")
+        # 7. Reload หน้าเว็บ และ Capture Full Page Screenshot
+        log("[STEP 7/7] Reloading page and capturing full screenshot...")
         time.sleep(1)
         driver.refresh()
-        time.sleep(2)  # รอให้หน้าโหลดเสร็จ
+        log("[STEP 7/7] Waiting 5 seconds just in case...")
+        time.sleep(5)  # รอให้หน้าโหลดเสร็จ (เพิ่มเป็น 5 วิ)
+        
+        # คำนวณขนาดหน้าเว็บเต็ม แล้วขยาย Window ให้พอดี
+        total_width = driver.execute_script("return document.body.scrollWidth")
+        total_height = driver.execute_script("return document.body.scrollHeight")
+        
+        # กำหนดขนาดหน้าต่างให้ครอบคลุมทั้งหน้า (Full Page)
+        driver.set_window_size(max(total_width, 1200), total_height + 200)
+        time.sleep(1)  # รอให้ resize เสร็จ
+        
+        # Scroll ไปบนสุดเพื่อให้แน่ใจว่าเห็นทั้งหมด
+        driver.execute_script("window.scrollTo(0, 0)")
+        time.sleep(0.5)
         
         # สร้าง screenshots folder ถ้ายังไม่มี
         import os
@@ -176,12 +194,13 @@ def run_bot(url=None, date=None, duty=None, name=None, callback=None):
         if not os.path.exists(screenshots_dir):
             os.makedirs(screenshots_dir)
         
-        # บันทึก Screenshot
+        # บันทึก Screenshot (Full Page)
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         screenshot_path = os.path.join(screenshots_dir, f"booking_{timestamp}.png")
         driver.save_screenshot(screenshot_path)
-        log(f"[STEP 7/7] ✅ Screenshot saved: {screenshot_path}")
+        log(f"[STEP 7/7] ✅ Full page screenshot saved: {screenshot_path}")
+        log(f"[STEP 7/7] 📐 Size: {total_width}x{total_height}px")
         
         return {"status": result_status, "message": result_message, "screenshot": screenshot_path}
 
