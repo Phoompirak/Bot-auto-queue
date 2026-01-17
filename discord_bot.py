@@ -152,7 +152,15 @@ async def queue(interaction: discord.Interaction, time_str: str):
         result = await loop.run_in_executor(None, run_bot_with_callback)
 
         channel = interaction.channel
-        await channel.send(f"🏁 **บอทรันเสร็จเรียบร้อยแล้ว!** (เวลาไทย {time_str})\n\n**ผลลัพธ์:**\n{result}")
+        try:
+            await channel.send(f"🏁 **บอทรันเสร็จเรียบร้อยแล้ว!** (เวลาไทย {time_str})\n\n**ผลลัพธ์:**\n{result}")
+        except Exception as send_error:
+            print(f"⚠️ ไม่สามารถส่งข้อความสรุปได้: {send_error}")
+            # พยายามแก้ไขข้อความเดิมแทน
+            try:
+                await message.edit(content=f"🏁 **บอทรันเสร็จเรียบร้อยแล้ว!**\n\n**ผลลัพธ์:**\n{result}")
+            except:
+                pass
 
     except ValueError:
         await interaction.response.send_message("❌ รูปแบบเวลาไม่ถูกต้อง! กรุณาใช้ HH:MM (เช่น 08:00)", ephemeral=True)

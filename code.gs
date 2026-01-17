@@ -1,4 +1,11 @@
 function doGet(e) {
+  // ป้องกัน error เมื่อกด Run ใน Editor (e จะเป็น undefined)
+  if (!e || !e.parameter) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ error: 'No parameters provided. Use web URL to call this API.' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  
   const action = e.parameter.action;
   
   // ถ้าไม่มี action ให้แสดงหน้า HTML
