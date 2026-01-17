@@ -4,14 +4,34 @@ from discord.ext import commands, tasks
 import datetime
 import asyncio
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 # โหลด Token จากไฟล์ .env
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
+PORT = int(os.getenv('PORT', 10000))
 
-# ใช้ Timezone ของไทย (UTC+7)
+# ==========================================
+# Simple HTTP Server สำหรับ Render Health Check
+# ==========================================
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'Discord Bot is running!')
+    
+    def log_message(self, format, *args):
+        pass  # ปิด log เพื่อไม่ให้รกคอนโซล
+
+def run_health_server():
+    server = HTTPServer(('0.0.0.0', PORT), HealthHandler)
+    print(f"🌐 Health check server running on port {PORT}")
+    server.serve_forever()
+
 THAI_TZ = ZoneInfo("Asia/Bangkok")
 
 class MyBot(commands.Bot):
@@ -131,4 +151,10 @@ if __name__ == "__main__":
         print("❌ Error: ไม่พบ DISCORD_TOKEN ในไฟล์ .env!")
         print("กรุณาสร้างไฟล์ .env แล้วใส่ DISCORD_TOKEN=your_token_here")
     else:
+        # เริ่ม HTTP server ใน background thread (สำหรับ Render health check)
+        health_thread = threading.Thread(target=run_health_server, daemon=True)
+        health_thread.start()
+        
+        # รัน Discord bot
         bot.run(TOKEN)
+
