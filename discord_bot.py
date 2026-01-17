@@ -37,6 +37,9 @@ THAI_TZ = ZoneInfo("Asia/Bangkok")
 class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
+        intents.message_content = True
+        intents.members = True # เห็นสมาชิกในเซิฟเวอร์
+        intents.presences = True # เห็นสถานะ Online/Offline
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
@@ -131,12 +134,25 @@ async def queue(interaction: discord.Interaction, time_str: str):
         
         print("🚀 Starting bot execution...")
         
+        # Callback function เพื่อส่ง Log กลับมาที่ Discord
+        # (ต้องใช้ run_coroutine_threadsafe เพราะ callback ถูกเรียกจาก Thread อื่น)
+        def progress_callback(text):
+            # กรองเฉพาะข้อความที่สำคัญ หรือตกแต่งข้อความ
+            content = f"🚀 **กำลังรันบอท...**\n```{text}```"
+            asyncio.run_coroutine_threadsafe(message.edit(content=content), bot.loop)
+
         from bot_script import run_bot
+        import functools
+        
+        # ใช้ partial เพื่อส่ง callback เข้าไป
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, run_bot)
+        run_bot_with_callback = functools.partial(run_bot, callback=progress_callback)
+        
+        # รันใน Executor เพื่อไม่ให้ Main Loop ค้าง
+        result = await loop.run_in_executor(None, run_bot_with_callback)
 
         channel = interaction.channel
-        await channel.send(f"🏁 **บอทรันเสร็จเรียบร้อยแล้ว!**\nตั้งเวลาไว้ที่ {time_str} (เวลาไทย)")
+        await channel.send(f"🏁 **บอทรันเสร็จเรียบร้อยแล้ว!** (เวลาไทย {time_str})\n\n**ผลลัพธ์:**\n{result}")
 
     except ValueError:
         await interaction.response.send_message("❌ รูปแบบเวลาไม่ถูกต้อง! กรุณาใช้ HH:MM (เช่น 08:00)", ephemeral=True)
