@@ -151,14 +151,33 @@ async def queue(interaction: discord.Interaction, time_str: str):
         # รันใน Executor เพื่อไม่ให้ Main Loop ค้าง
         result = await loop.run_in_executor(None, run_bot_with_callback)
 
+        # Parse ผลลัพธ์ (result เป็น dict ที่มี status, message, screenshot)
+        status = result.get("status", "UNKNOWN")
+        message_text = result.get("message", "No message")
+        screenshot_path = result.get("screenshot")
+        
+        # สร้างข้อความสรุป
+        if status == "SUCCESS":
+            summary = f"✅ **จองสำเร็จ!**\n📝 {message_text}"
+        elif status == "FAILED":
+            summary = f"❌ **จองไม่สำเร็จ!**\n📝 เหตุผล: {message_text}"
+        elif status == "ERROR":
+            summary = f"⚠️ **เกิดข้อผิดพลาด!**\n📝 {message_text}"
+        else:
+            summary = f"❓ **สถานะไม่แน่ชัด**\n📝 {message_text}"
+        
         channel = interaction.channel
         try:
-            await channel.send(f"🏁 **บอทรันเสร็จเรียบร้อยแล้ว!** (เวลาไทย {time_str})\n\n**ผลลัพธ์:**\n{result}")
+            # ส่งข้อความพร้อม Screenshot (ถ้ามี)
+            if screenshot_path and os.path.exists(screenshot_path):
+                file = discord.File(screenshot_path, filename="booking_result.png")
+                await channel.send(content=f"🏁 **บอทรันเสร็จแล้ว** (เวลาไทย {time_str})\n\n{summary}", file=file)
+            else:
+                await channel.send(f"🏁 **บอทรันเสร็จแล้ว** (เวลาไทย {time_str})\n\n{summary}\n\n(ไม่สามารถถ่าย Screenshot ได้)")
         except Exception as send_error:
             print(f"⚠️ ไม่สามารถส่งข้อความสรุปได้: {send_error}")
-            # พยายามแก้ไขข้อความเดิมแทน
             try:
-                await message.edit(content=f"🏁 **บอทรันเสร็จเรียบร้อยแล้ว!**\n\n**ผลลัพธ์:**\n{result}")
+                await message.edit(content=f"🏁 **บอทรันเสร็จแล้ว!**\n\n{summary}")
             except:
                 pass
 

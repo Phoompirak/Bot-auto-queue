@@ -118,51 +118,84 @@ def run_bot(url=None, date=None, duty=None, name=None, callback=None):
             fallback_duty = "ลบกระดานปิดหน้าต่าง"
             if duty != fallback_duty:
                 try:
-                    print(f"[STEP 4/6] Trying fallback: {fallback_duty}")
+                    log(f"[STEP 4/6] Trying fallback: {fallback_duty}")
                     select.select_by_visible_text(fallback_duty)
-                    print(f"[STEP 4/6] ✅ Fallback selected: {fallback_duty}")
+                    log(f"[STEP 4/6] ✅ Fallback selected: {fallback_duty}")
                 except Exception:
-                    print(f"[STEP 4/6] ❌ Fallback also failed")
-                    return "FAILED: No available duty"
+                    log(f"[STEP 4/6] ❌ Fallback also failed")
+                    return {"status": "FAILED", "message": "No available duty", "screenshot": None}
             else:
-                return "FAILED: Duty not available"
+                return {"status": "FAILED", "message": "Duty not available", "screenshot": None}
 
         time.sleep(DELAY_SECONDS)
         
         # 4. กรอกชื่อ
-        print(f"[STEP 5/6] Entering name: {name}")
+        log(f"[STEP 5/6] Entering name: {name}")
         name_input = driver.find_element(By.XPATH, '//*[@id="name"]')
         name_input.clear()
         name_input.send_keys(name)
         time.sleep(DELAY_SECONDS)
-        print("[STEP 5/6] ✅ Name entered")
+        log("[STEP 5/6] ✅ Name entered")
         
         # 5. กดปุ่มบันทึก
-        print("[STEP 6/6] Clicking submit button...")
+        log("[STEP 6/6] Clicking submit button...")
         submit_btn = driver.find_element(By.XPATH, '//*[@id="submitBtn"]')
         submit_btn.click()
         
         # 6. ตรวจสอบผลลัพธ์
+        screenshot_path = None
+        result_status = "UNKNOWN"
+        result_message = "No success message"
+        
         try:
             success_msg = WebDriverWait(driver, 10).until(
                 EC.visibility_of_element_located((By.CLASS_NAME, "success"))
             )
-            print(f"[STEP 6/6] 🎉 SUCCESS: {success_msg.text}")
-            return f"SUCCESS: {success_msg.text}"
+            log(f"[STEP 6/6] 🎉 SUCCESS: {success_msg.text}")
+            result_status = "SUCCESS"
+            result_message = success_msg.text
         except:
-            print("[STEP 6/6] ⚠️ No success message detected")
-            return "UNKNOWN: No success message"
+            # ลองหา error message
+            try:
+                error_msg = driver.find_element(By.CLASS_NAME, "error")
+                log(f"[STEP 6/6] ❌ FAILED: {error_msg.text}")
+                result_status = "FAILED"
+                result_message = error_msg.text
+            except:
+                log("[STEP 6/6] ⚠️ No success/error message detected")
+        
+        # 7. Reload หน้าเว็บ และ Capture Screenshot
+        log("[STEP 7/7] Reloading page and capturing screenshot...")
+        time.sleep(1)
+        driver.refresh()
+        time.sleep(2)  # รอให้หน้าโหลดเสร็จ
+        
+        # สร้าง screenshots folder ถ้ายังไม่มี
+        import os
+        screenshots_dir = os.path.join(os.path.dirname(__file__), "screenshots")
+        if not os.path.exists(screenshots_dir):
+            os.makedirs(screenshots_dir)
+        
+        # บันทึก Screenshot
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        screenshot_path = os.path.join(screenshots_dir, f"booking_{timestamp}.png")
+        driver.save_screenshot(screenshot_path)
+        log(f"[STEP 7/7] ✅ Screenshot saved: {screenshot_path}")
+        
+        return {"status": result_status, "message": result_message, "screenshot": screenshot_path}
 
     except Exception as e:
-        print(f"[ERROR] ❌ Bot crashed: {e}")
-        return f"ERROR: {e}"
+        log(f"[ERROR] ❌ Bot crashed: {e}")
+        return {"status": "ERROR", "message": str(e), "screenshot": None}
     finally:
-        print("=" * 50)
-        print("🏁 BOT SCRIPT FINISHED")
-        print("=" * 50)
-        time.sleep(3)
+        log("=" * 50)
+        log("🏁 BOT SCRIPT FINISHED")
+        log("=" * 50)
+        time.sleep(2)
         driver.quit()
 
 if __name__ == "__main__":
     result = run_bot()
     print(f"\n📊 FINAL RESULT: {result}")
+
