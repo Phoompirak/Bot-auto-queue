@@ -5,41 +5,55 @@ import datetime
 import asyncio
 import os
 import threading
+import json
+import urllib.request
+import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
-# โหลด Token จากไฟล์ .env
+# โหลด Config จากไฟล์ .env
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 PORT = int(os.getenv('PORT', 10000))
+APPS_SCRIPT_URL = os.getenv('APPS_SCRIPT_URL', '')  # URL ของ Google Apps Script
 
 # ==========================================
-# Simple HTTP Server สำหรับ Render Health Check
+# Timezone
 # ==========================================
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b'Discord Bot is running!')
-    
-    def log_message(self, format, *args):
-        pass  # ปิด log เพื่อไม่ให้รกคอนโซล
-
-def run_health_server():
-    server = HTTPServer(('0.0.0.0', PORT), HealthHandler)
-    print(f"🌐 Health check server running on port {PORT}")
-    server.serve_forever()
-
 THAI_TZ = ZoneInfo("Asia/Bangkok")
 
+# ==========================================
+# Google Apps Script API Helpers
+# ==========================================
+def call_apps_script(action, params=None):
+    """เรียก Google Apps Script API"""
+    if not APPS_SCRIPT_URL:
+        print("⚠️ APPS_SCRIPT_URL not set in .env")
+        return {"error": "APPS_SCRIPT_URL not configured"}
+    
+    try:
+        url = f"{APPS_SCRIPT_URL}?action={action}"
+        if params:
+            for key, value in params.items():
+                url += f"&{urllib.parse.quote(key)}={urllib.parse.quote(str(value))}"
+        
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        print(f"⚠️ Apps Script call failed: {e}")
+        return {"error": str(e)}
+
+# ==========================================
+# Bot Instance
+# ==========================================
 class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
-        intents.members = True # เห็นสมาชิกในเซิฟเวอร์
-        intents.presences = True # เห็นสถานะ Online/Offline
+        intents.members = True
+        intents.presences = True
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
@@ -48,20 +62,128 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
+# ==========================================
+# HTTP Server with /check-jobs endpoint
+# ==========================================
+class SchedulerHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/check-jobs':
+            # เช็คและรัน jobs ที่ถึงเวลา
+            result = asyncio.run_coroutine_threadsafe(
+                execute_pending_jobs(), 
+                bot.loop
+            ).result(timeout=300)
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        else:
+            # Health check
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'Discord Bot is running!')
+    
+    def log_message(self, format, *args):
+        print(f"🌐 HTTP: {args[0]}")
+
+def run_http_server():
+    server = HTTPServer(('0.0.0.0', PORT), SchedulerHandler)
+    print(f"🌐 HTTP server running on port {PORT}")
+    print(f"📡 Endpoints: / (health), /check-jobs (scheduler)")
+    server.serve_forever()
+
+# ==========================================
+# Job Execution Logic
+# ==========================================
+async def execute_pending_jobs():
+    """เช็คและรัน jobs ที่ถึงเวลาแล้ว"""
+    print("🔍 Checking for pending jobs...")
+    
+    # ดึง jobs ที่ถึงเวลาจาก Google Sheets
+    result = call_apps_script('getPendingJobs')
+    jobs = result.get('jobs', [])
+    
+    if not jobs:
+        print("✅ No pending jobs")
+        return {"status": "ok", "jobs_executed": 0}
+    
+    print(f"📋 Found {len(jobs)} pending job(s)")
+    executed = 0
+    
+    for job in jobs:
+        try:
+            print(f"🚀 Executing job: {job['job_id']}")
+            
+            # รัน bot_script
+            from bot_script import run_bot
+            import functools
+            
+            loop = asyncio.get_event_loop()
+            run_bot_func = functools.partial(
+                run_bot,
+                date=job['booking_date'],
+                duty=job['duty'],
+                name=job['name']
+            )
+            
+            bot_result = await loop.run_in_executor(None, run_bot_func)
+            
+            # อัปเดตสถานะ job
+            status = bot_result.get('status', 'UNKNOWN')
+            call_apps_script('markJobDone', {
+                'job_id': job['job_id'],
+                'result_status': status
+            })
+            
+            # ส่งผลลัพธ์ไป Discord (ถ้ามี channel_id)
+            if job.get('channel_id'):
+                try:
+                    channel = bot.get_channel(int(job['channel_id']))
+                    if channel:
+                        message_text = bot_result.get('message', 'No message')
+                        screenshot_path = bot_result.get('screenshot')
+                        
+                        if status == "SUCCESS":
+                            summary = f"✅ **จองสำเร็จ!**\n📝 {message_text}"
+                        elif status == "FAILED":
+                            summary = f"❌ **จองไม่สำเร็จ!**\n📝 {message_text}"
+                        else:
+                            summary = f"⚠️ **สถานะ: {status}**\n📝 {message_text}"
+                        
+                        content = f"🏁 **บอทรันเสร็จแล้ว!**\n📋 Job: `{job['job_id']}`\n🧹 หน้าที่: `{job['duty']}`\n✍️ ชื่อ: `{job['name']}`\n\n{summary}"
+                        
+                        if screenshot_path and os.path.exists(screenshot_path):
+                            file = discord.File(screenshot_path, filename="booking_result.png")
+                            await channel.send(content=content, file=file)
+                        else:
+                            await channel.send(content)
+                except Exception as e:
+                    print(f"⚠️ Failed to send Discord message: {e}")
+            
+            executed += 1
+            print(f"✅ Job {job['job_id']} completed with status: {status}")
+            
+        except Exception as e:
+            print(f"❌ Job {job['job_id']} failed: {e}")
+            call_apps_script('markJobDone', {
+                'job_id': job['job_id'],
+                'result_status': 'ERROR'
+            })
+    
+    return {"status": "ok", "jobs_executed": executed}
+
+# ==========================================
+# Discord Events
+# ==========================================
 @bot.event
 async def on_ready():
     print(f"🤖 Discord Bot is ready as {bot.user}")
 
-def format_countdown(seconds):
-    """แปลงวินาทีเป็นรูปแบบ ชม:นาที:วินาที"""
-    hours, remainder = divmod(int(seconds), 3600)
-    minutes, secs = divmod(remainder, 60)
-    if hours > 0:
-        return f"{hours} ชั่วโมง {minutes} นาที {secs} วินาที"
-    elif minutes > 0:
-        return f"{minutes} นาที {secs} วินาที"
-        return f"{secs} วินาที"
-
+# ==========================================
+# Slash Commands
+# ==========================================
 @bot.tree.command(name="help-queue", description="ดูวิธีใช้งานบอทจองเวร")
 async def help_queue(interaction: discord.Interaction):
     embed = discord.Embed(
@@ -71,20 +193,26 @@ async def help_queue(interaction: discord.Interaction):
     )
     
     embed.add_field(
-        name="1. สั่งจองวันนี้/พรุ่งนี้",
-        value="`/queue 08:30`\n(บอทจะเริ่มรันเวลา 08:30 ของวันนี้ หรือพรุ่งนี้ถ้าเลยเวลาแล้ว)",
+        name="📌 คำสั่งหลัก",
+        value="`/queue 08:30`\n(ตั้งเวลาจองเวลา 08:30)",
         inline=False
     )
     
     embed.add_field(
-        name="2. สั่งจองล่วงหน้า (ระบุวันที่, หน้าที่, ชื่อ)",
-        value="`/queue 08:30` (สามารถเลือก option เสริมได้)\n- `date_str`: ระบุวันที่ (เช่น 21/01/69)\n- `duty_select`: เลือกหน้าที่ (มีให้เลือกในลิสต์)\n- `name_input`: ระบุชื่อคนจอง",
+        name="📅 ระบุวันที่",
+        value="`date_str`: ระบุวันที่ (เช่น 21/01/69)\nถ้าไม่ใส่ = วันนี้หรือพรุ่งนี้",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="🧹 เลือกหน้าที่/ชื่อ",
+        value="`duty_select`: เลือกจากลิสต์\n`name_input`: พิมพ์ชื่อเอง",
         inline=False
     )
     
     embed.add_field(
         name="ℹ️ หมายเหตุ",
-        value="- ถ้าไม่ระบุ `duty` หรือ `name` จะใช้ค่าเริ่มต้นจาก `.env`\n- เมื่อจองเสร็จจะมีรูป Screenshot ส่งมาให้ดู",
+        value="- คิวจะถูกบันทึกไว้ใน Google Sheets\n- บอทจะทำงานตามเวลาที่ตั้งไว้ (±1 นาที)\n- แม้บอท restart ก็ไม่หาย!",
         inline=False
     )
     
@@ -122,15 +250,11 @@ async def queue(interaction: discord.Interaction, time_str: str, date_str: str =
         else:
             day_text = "วันนี้"
 
-        wait_seconds = (target_datetime - now).total_seconds()
-        countdown_text = format_countdown(wait_seconds)
+        scheduled_date = target_datetime.strftime("%Y-%m-%d")
+        scheduled_time = time_str
         
         # 2. คำนวณวันที่ที่จะจอง (Booking Date)
-        booking_date = ""
-        date_note = ""
-        
         if date_str:
-            # กรณีระบุวันที่เอง (คาดว่าเป็น พ.ศ. dd/mm/yy)
             try:
                 parts = date_str.split('/')
                 d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
@@ -141,9 +265,8 @@ async def queue(interaction: discord.Interaction, time_str: str, date_str: str =
                 elif y > 2400:
                     y_ad = y - 543
                 else:
-                    y_ad = y # กรณีใส่ 2026 มาตรงๆ
+                    y_ad = y
                 
-                # Format เป็น YYYY-MM-DD
                 booking_date_obj = datetime.date(y_ad, m, d)
                 booking_date = booking_date_obj.strftime("%Y-%m-%d")
                 date_note = "(ระบุเอง)"
@@ -151,148 +274,45 @@ async def queue(interaction: discord.Interaction, time_str: str, date_str: str =
                 await interaction.response.send_message("❌ รูปแบบวันที่ไม่ถูกต้อง! กรุณาใช้ dd/mm/yy (เช่น 21/01/69)", ephemeral=True)
                 return
         else:
-            # กรณีไม่ระบุ -> ใช้วันเดียวกับที่บอทจะรัน
-            booking_date = target_datetime.strftime("%Y-%m-%d")
+            booking_date = scheduled_date
             date_note = f"({day_text})"
         
-        # ดึงค่า Config อื่นๆ (จาก .env)
-        from bot_script import TARGET_URL, TARGET_DUTY as ENV_DUTY, TARGET_NAME as ENV_NAME, get_today_date, run_bot
+        # 3. ดึงค่า Config และกำหนดค่า
+        from bot_script import TARGET_DUTY as ENV_DUTY, TARGET_NAME as ENV_NAME
         
-        # ใช้ค่าที่ user เลือก หรือใช้จาก .env ถ้าไม่ได้เลือก
         final_duty = duty_select.value if duty_select else ENV_DUTY
         final_name = name_input if name_input else ENV_NAME
+        channel_id = str(interaction.channel_id)
         
-        msg_content = (
-            f"✅ **ตั้งเวลาสำเร็จ!**\n"
-            f"📅 บอทจะเริ่มทำงาน{day_text}เวลา **{time_str}** (เวลาไทย)\n"
-            f"⏳ นับถอยหลัง: **{countdown_text}**\n\n"
-            f"📋 **ข้อมูลที่จะใช้จอง:**\n"
-            f"🌐 URL: `{TARGET_URL}`\n"
-            f"📆 วันที่ที่จะจอง: `{booking_date}` {date_note}\n"
-            f"🧹 หน้าที่: `{final_duty}`\n"
-            f"✍️ ชื่อ: `{final_name}`"
+        # 4. บันทึกลง Google Sheets
+        result = call_apps_script('addScheduledJob', {
+            'scheduled_date': scheduled_date,
+            'scheduled_time': scheduled_time,
+            'booking_date': booking_date,
+            'duty': final_duty,
+            'name': final_name,
+            'channel_id': channel_id
+        })
+        
+        if not result.get('success'):
+            await interaction.response.send_message(f"❌ บันทึกคิวไม่สำเร็จ: {result.get('message', 'Unknown error')}", ephemeral=True)
+            return
+        
+        job_id = result.get('job_id', 'N/A')
+        
+        # 5. ส่งข้อความยืนยัน
+        embed = discord.Embed(
+            title="✅ บันทึกคิวสำเร็จ!",
+            description=f"บอทจะทำงาน**{day_text}** เวลา **{time_str}** น.",
+            color=discord.Color.green()
         )
+        embed.add_field(name="🆔 Job ID", value=f"`{job_id}`", inline=True)
+        embed.add_field(name="📅 วันที่จอง", value=f"`{booking_date}` {date_note}", inline=True)
+        embed.add_field(name="🧹 หน้าที่", value=final_duty, inline=True)
+        embed.add_field(name="✍️ ชื่อ", value=final_name, inline=True)
+        embed.set_footer(text="💡 คิวนี้จะไม่หายแม้บอท restart!")
         
-        await interaction.response.send_message(msg_content)
-        
-        message = await interaction.original_response()
-
-        # อัปเดตนับถอยหลังทุกๆ 5 วินาที (หรือทุก 1 นาทีถ้าเหลือเยอะ)
-        update_interval = 60 if wait_seconds > 300 else 5
-        
-        while wait_seconds > 0:
-            await asyncio.sleep(min(update_interval, wait_seconds))
-            now = datetime.datetime.now(THAI_TZ)
-            wait_seconds = (target_datetime - now).total_seconds()
-            
-            if wait_seconds <= 0:
-                break
-                
-            countdown_text = format_countdown(wait_seconds)
-            msg_content = (
-                f"✅ **ตั้งเวลาสำเร็จ!**\n"
-                f"📅 บอทจะเริ่มทำงาน{day_text}เวลา **{time_str}** (เวลาไทย)\n"
-                f"⏳ นับถอยหลัง: **{countdown_text}**\n\n"
-                f"📋 **ข้อมูลที่จะใช้จอง:**\n"
-                f"🌐 URL: `{TARGET_URL}`\n"
-                f"📆 วันที่ที่จะจอง: `{booking_date}` {date_note}\n"
-                f"🧹 หน้าที่: `{final_duty}`\n"
-                f"✍️ ชื่อ: `{final_name}`"
-            )
-            try:
-                await message.edit(content=msg_content)
-            except:
-                pass
-
-        # ถึงเวลาแล้ว!
-        await message.edit(content=f"🚀 **ถึงเวลาแล้ว!** กำลังเริ่มรันบอท...")
-        
-        print("🚀 Starting bot execution...")
-        
-        # Callback function เพื่อส่ง Log กลับมาที่ Discord
-        # (ต้องใช้ run_coroutine_threadsafe เพราะ callback ถูกเรียกจาก Thread อื่น)
-        def progress_callback(text):
-            # กรองเฉพาะข้อความที่สำคัญ หรือตกแต่งข้อความ
-            content = f"🚀 **กำลังรันบอท...**\n```{text}```"
-            asyncio.run_coroutine_threadsafe(message.edit(content=content), bot.loop)
-
-        from bot_script import run_bot
-        import functools
-        
-        # ใช้ partial เพื่อส่ง callback และ parameters ต่างๆ เข้าไป
-        loop = asyncio.get_event_loop()
-        run_bot_with_callback = functools.partial(
-            run_bot, 
-            date=booking_date, 
-            duty=final_duty, 
-            name=final_name, 
-            callback=progress_callback
-        )
-        
-        # รันใน Executor เพื่อไม่ให้ Main Loop ค้าง
-        result = await loop.run_in_executor(None, run_bot_with_callback)
-
-        # Parse ผลลัพธ์ (result เป็น dict ที่มี status, message, screenshot)
-        status = result.get("status", "UNKNOWN")
-        message_text = result.get("message", "No message")
-        screenshot_path = result.get("screenshot")
-        
-        # สร้างข้อความสรุป
-        if status == "SUCCESS":
-            summary = f"✅ **จองสำเร็จ!**\n📝 {message_text}"
-        elif status == "FAILED":
-            summary = f"❌ **จองไม่สำเร็จ!**\n📝 เหตุผล: {message_text}"
-        elif status == "ERROR":
-            summary = f"⚠️ **เกิดข้อผิดพลาด!**\n📝 {message_text}"
-        else:
-            summary = f"❓ **สถานะไม่แน่ชัด**\n📝 {message_text}"
-        
-        channel = interaction.channel
-        
-        # Debug: แสดง screenshot path
-        print(f"📸 Screenshot path: {screenshot_path}")
-        if screenshot_path:
-            print(f"📸 File exists: {os.path.exists(screenshot_path)}")
-        
-        # พยายามส่งหลายวิธี
-        sent = False
-        
-        # วิธี 1: ใช้ interaction.followup.send (แนะนำ)
-        if not sent:
-            try:
-                if screenshot_path and os.path.exists(screenshot_path):
-                    print(f"📸 Trying followup.send with screenshot...")
-                    file = discord.File(screenshot_path, filename="booking_result.png")
-                    await interaction.followup.send(content=f"🏁 **บอทรันเสร็จแล้ว** (เวลาไทย {time_str})\n\n{summary}", file=file)
-                else:
-                    await interaction.followup.send(f"🏁 **บอทรันเสร็จแล้ว** (เวลาไทย {time_str})\n\n{summary}\n\n(ไม่สามารถถ่าย Screenshot ได้)")
-                sent = True
-                print(f"📸 Sent via followup!")
-            except Exception as e:
-                print(f"⚠️ followup.send failed: {e}")
-        
-        # วิธี 2: ใช้ channel.send
-        if not sent:
-            try:
-                if screenshot_path and os.path.exists(screenshot_path):
-                    print(f"📸 Trying channel.send with screenshot...")
-                    file = discord.File(screenshot_path, filename="booking_result.png")
-                    await channel.send(content=f"🏁 **บอทรันเสร็จแล้ว** (เวลาไทย {time_str})\n\n{summary}", file=file)
-                else:
-                    await channel.send(f"🏁 **บอทรันเสร็จแล้ว** (เวลาไทย {time_str})\n\n{summary}")
-                sent = True
-                print(f"📸 Sent via channel!")
-            except Exception as e:
-                print(f"⚠️ channel.send failed: {e}")
-        
-        # วิธี 3: แก้ไขข้อความเดิม (fallback สุดท้าย - ไม่มีรูป)
-        if not sent:
-            try:
-                print(f"📸 Trying message.edit as last resort...")
-                await message.edit(content=f"🏁 **บอทรันเสร็จแล้ว!**\n\n{summary}\n\n📸 Screenshot: {screenshot_path}")
-                print(f"📸 Updated via message.edit!")
-            except Exception as e:
-                print(f"⚠️ All send methods failed: {e}")
+        await interaction.response.send_message(embed=embed)
 
     except ValueError:
         await interaction.response.send_message("❌ รูปแบบเวลาไม่ถูกต้อง! กรุณาใช้ HH:MM (เช่น 08:00)", ephemeral=True)
@@ -302,15 +322,53 @@ async def queue(interaction: discord.Interaction, time_str: str, date_str: str =
         except:
             print(f"❌ Error: {e}")
 
+@bot.tree.command(name="list-jobs", description="ดูรายการคิวที่รอทำ")
+async def list_jobs(interaction: discord.Interaction):
+    result = call_apps_script('getPendingJobs')
+    jobs = result.get('jobs', [])
+    
+    if not jobs:
+        await interaction.response.send_message("📭 ไม่มีคิวที่รอทำ", ephemeral=True)
+        return
+    
+    embed = discord.Embed(
+        title="📋 รายการคิวที่รอทำ",
+        color=discord.Color.blue()
+    )
+    
+    for job in jobs[:10]:  # แสดงแค่ 10 อันแรก
+        embed.add_field(
+            name=f"🔹 {job['scheduled_date']} {job['scheduled_time']}",
+            value=f"หน้าที่: {job['duty']} | ชื่อ: {job['name']}\nID: `{job['job_id']}`",
+            inline=False
+        )
+    
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="cancel-job", description="ยกเลิกคิว")
+@app_commands.describe(job_id="Job ID ที่ต้องการยกเลิก")
+async def cancel_job(interaction: discord.Interaction, job_id: str):
+    result = call_apps_script('cancelJob', {'job_id': job_id})
+    
+    if result.get('success'):
+        await interaction.response.send_message(f"✅ ยกเลิกคิว `{job_id}` สำเร็จ!")
+    else:
+        await interaction.response.send_message(f"❌ ยกเลิกไม่สำเร็จ: {result.get('message')}", ephemeral=True)
+
+# ==========================================
+# Main
+# ==========================================
 if __name__ == "__main__":
     if not TOKEN:
         print("❌ Error: ไม่พบ DISCORD_TOKEN ในไฟล์ .env!")
         print("กรุณาสร้างไฟล์ .env แล้วใส่ DISCORD_TOKEN=your_token_here")
+    elif not APPS_SCRIPT_URL:
+        print("⚠️ Warning: ไม่พบ APPS_SCRIPT_URL ในไฟล์ .env!")
+        print("กรุณาใส่ URL ของ Google Apps Script")
     else:
-        # เริ่ม HTTP server ใน background thread (สำหรับ Render health check)
-        health_thread = threading.Thread(target=run_health_server, daemon=True)
-        health_thread.start()
+        # เริ่ม HTTP server ใน background thread
+        http_thread = threading.Thread(target=run_http_server, daemon=True)
+        http_thread.start()
         
         # รัน Discord bot
         bot.run(TOKEN)
-

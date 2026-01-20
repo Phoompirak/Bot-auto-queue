@@ -32,6 +32,26 @@ function doGet(e) {
     case 'getAvailableDuties':
       result = { duties: getAvailableDuties(e.parameter.date) };
       break;
+    // === Scheduled Jobs API ===
+    case 'addScheduledJob':
+      result = addScheduledJob({
+        scheduled_date: e.parameter.scheduled_date,
+        scheduled_time: e.parameter.scheduled_time,
+        booking_date: e.parameter.booking_date,
+        duty: e.parameter.duty,
+        name: e.parameter.name,
+        channel_id: e.parameter.channel_id
+      });
+      break;
+    case 'getPendingJobs':
+      result = { jobs: getPendingJobs() };
+      break;
+    case 'markJobDone':
+      result = markJobDone(e.parameter.job_id, e.parameter.result_status);
+      break;
+    case 'cancelJob':
+      result = cancelJob(e.parameter.job_id);
+      break;
     default:
       result = { error: 'Unknown action' };
   }
@@ -161,4 +181,114 @@ function getSheet() {
     sheet.setFrozenRows(1);
   }
   return sheet;
+}
+
+// ============================================
+// SCHEDULED JOBS FUNCTIONS
+// ============================================
+
+/**
+ * จัดการ ScheduledJobs Sheet (สร้างถ้ายังไม่มี)
+ */
+function getScheduledJobsSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName("ScheduledJobs");
+  if (!sheet) {
+    sheet = ss.insertSheet("ScheduledJobs");
+    sheet.appendRow(["JobID", "CreatedAt", "ScheduledDate", "ScheduledTime", "BookingDate", "Duty", "Name", "ChannelID", "Status"]);
+    sheet.getRange(1, 1, 1, 9).setFontWeight("bold").setBackground("#d9ead3");
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+/**
+ * เพิ่ม Scheduled Job
+ */
+function addScheduledJob(data) {
+  try {
+    const sheet = getScheduledJobsSheet();
+    const jobId = "JOB_" + new Date().getTime();
+    
+    sheet.appendRow([
+      jobId,
+      new Date(),
+      data.scheduled_date,  // วันที่จะให้บอททำงาน (YYYY-MM-DD)
+      data.scheduled_time,  // เวลาที่จะให้บอททำงาน (HH:MM)
+      data.booking_date,    // วันที่จะจอง (YYYY-MM-DD)
+      data.duty,
+      data.name,
+      data.channel_id || "",
+      "PENDING"
+    ]);
+    
+    return { success: true, job_id: jobId, message: "บันทึกคิวสำเร็จ!" };
+  } catch (e) {
+    return { success: false, message: "เกิดข้อผิดพลาด: " + e.toString() };
+  }
+}
+
+/**
+ * ดึง Jobs ที่ถึงเวลาแล้ว (PENDING และ เวลาปัจจุบัน >= เวลาที่ตั้งไว้)
+ */
+function getPendingJobs() {
+  const sheet = getScheduledJobsSheet();
+  const data = sheet.getDataRange().getValues();
+  const pendingJobs = [];
+  
+  const now = new Date();
+  const nowDate = Utilities.formatDate(now, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  const nowTime = Utilities.formatDate(now, Session.getScriptTimeZone(), "HH:mm");
+  
+  for (let i = 1; i < data.length; i++) {
+    const status = data[i][8];
+    if (status !== "PENDING") continue;
+    
+    const scheduledDate = data[i][2];
+    const scheduledTime = data[i][3];
+    
+    // เช็คว่าถึงเวลาหรือยัง
+    if (scheduledDate < nowDate || (scheduledDate === nowDate && scheduledTime <= nowTime)) {
+      pendingJobs.push({
+        job_id: data[i][0],
+        row_index: i + 1,  // 1-indexed for sheet operations
+        scheduled_date: scheduledDate,
+        scheduled_time: scheduledTime,
+        booking_date: data[i][4],
+        duty: data[i][5],
+        name: data[i][6],
+        channel_id: data[i][7]
+      });
+    }
+  }
+  
+  return pendingJobs;
+}
+
+/**
+ * อัปเดตสถานะ Job เป็น DONE หรือ FAILED
+ */
+function markJobDone(jobId, resultStatus) {
+  try {
+    const sheet = getScheduledJobsSheet();
+    const data = sheet.getDataRange().getValues();
+    
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][0] === jobId) {
+        sheet.getRange(i + 1, 9).setValue(resultStatus || "DONE");
+        return { success: true, message: "อัปเดตสถานะสำเร็จ" };
+      }
+    }
+    
+    return { success: false, message: "ไม่พบ Job ID: " + jobId };
+  } catch (e) {
+    return { success: false, message: "เกิดข้อผิดพลาด: " + e.toString() };
+  }
+}
+
+/**
+ * ยกเลิก Job
+ */
+function cancelJob(jobId) {
+  return markJobDone(jobId, "CANCELLED");
 }
