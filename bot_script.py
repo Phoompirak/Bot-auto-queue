@@ -160,7 +160,7 @@ def run_bot(url=None, date=None, duty=None, name=None, callback=None):
             result_status = "SUCCESS"
             result_message = success_msg.text
         except:
-            # ลองหา error message
+             # ลองหา error message
             try:
                 error_msg = driver.find_element(By.CLASS_NAME, "error")
                 log(f"[STEP 6/6] ❌ FAILED: {error_msg.text}")
@@ -171,48 +171,67 @@ def run_bot(url=None, date=None, duty=None, name=None, callback=None):
         
         # 7. Reload หน้าเว็บ และ Capture Full Page Screenshot
         log("[STEP 7/7] Reloading page and capturing full screenshot...")
-        time.sleep(1)
-        driver.refresh()
-        log("[STEP 7/7] Waiting 5 seconds just in case...")
-        time.sleep(5)  # รอให้หน้าโหลดเสร็จ (เพิ่มเป็น 5 วิ)
-        
-        # คำนวณขนาดหน้าเว็บเต็ม แล้วขยาย Window ให้พอดี
-        total_width = driver.execute_script("return document.body.scrollWidth")
-        total_height = driver.execute_script("return document.body.scrollHeight")
-        
-        # กำหนดขนาดหน้าต่างให้ครอบคลุมทั้งหน้า (Full Page)
-        driver.set_window_size(max(total_width, 1200), total_height + 200)
-        time.sleep(1)  # รอให้ resize เสร็จ
-        
-        # Scroll ไปบนสุดเพื่อให้แน่ใจว่าเห็นทั้งหมด
-        driver.execute_script("window.scrollTo(0, 0)")
-        time.sleep(0.5)
-        
-        # สร้าง screenshots folder ถ้ายังไม่มี
-        import os
-        screenshots_dir = os.path.join(os.path.dirname(__file__), "screenshots")
-        if not os.path.exists(screenshots_dir):
-            os.makedirs(screenshots_dir)
-        
-        # บันทึก Screenshot (Full Page)
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        screenshot_path = os.path.join(screenshots_dir, f"booking_{timestamp}.png")
-        driver.save_screenshot(screenshot_path)
-        log(f"[STEP 7/7] ✅ Full page screenshot saved: {screenshot_path}")
-        log(f"[STEP 7/7] 📐 Size: {total_width}x{total_height}px")
+        screenshot_path = capture_full_page_screenshot(driver, log)
         
         return {"status": result_status, "message": result_message, "screenshot": screenshot_path}
 
     except Exception as e:
-        log(f"[ERROR] ❌ Bot crashed: {e}")
-        return {"status": "ERROR", "message": str(e), "screenshot": None}
+        error_msg = str(e) or "Unknown error"
+        log(f"[ERROR] ❌ Bot crashed: {error_msg}")
+        
+        # พยายามถ่าย Screenshot ตอน Error ด้วย
+        try:
+            screenshot_path = capture_full_page_screenshot(driver, log, prefix="error")
+        except:
+            screenshot_path = None
+            
+        return {"status": "ERROR", "message": error_msg, "screenshot": screenshot_path}
     finally:
         log("=" * 50)
         log("🏁 BOT SCRIPT FINISHED")
         log("=" * 50)
         time.sleep(2)
-        driver.quit()
+        try:
+            driver.quit()
+        except:
+            pass
+
+def capture_full_page_screenshot(driver, log_func, prefix="booking"):
+    """ฟังก์ชันช่วยถ่าย Screenshot แบบ Full Page"""
+    try:
+        # ถ้า prefix คือ booking (สำเร็จ) ให้ refresh และรอ
+        if prefix == "booking":
+            time.sleep(1)
+            driver.refresh()
+            log_func("[SCREENSHOT] Waiting 5 seconds for page load...")
+            time.sleep(5)
+        
+        # คำนวณขนาดหน้าเว็บเต็ม แล้วขยาย Window ให้พอดี
+        total_width = driver.execute_script("return document.body.scrollWidth")
+        total_height = driver.execute_script("return document.body.scrollHeight")
+        
+        # กำหนดขนาดหน้าต่างให้ครอบคลุมทั้งหน้า
+        driver.set_window_size(max(total_width, 1200), total_height + 200)
+        time.sleep(1)
+        
+        # Scroll ไปบนสุด
+        driver.execute_script("window.scrollTo(0, 0)")
+        time.sleep(0.5)
+        
+        # สร้าง screenshots folder
+        screenshots_dir = os.path.join(os.path.dirname(__file__), "screenshots")
+        if not os.path.exists(screenshots_dir):
+            os.makedirs(screenshots_dir)
+        
+        # บันทึก Screenshot
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        screenshot_path = os.path.join(screenshots_dir, f"{prefix}_{timestamp}.png")
+        driver.save_screenshot(screenshot_path)
+        log_func(f"[SCREENSHOT] ✅ Saved: {screenshot_path}")
+        return screenshot_path
+    except Exception as e:
+        log_func(f"[SCREENSHOT] ⚠️ Failed: {e}")
+        return None
 
 if __name__ == "__main__":
     result = run_bot()

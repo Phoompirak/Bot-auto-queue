@@ -44,7 +44,7 @@ function doGet(e) {
       });
       break;
     case 'getPendingJobs':
-      result = { jobs: getPendingJobs() };
+      result = getPendingJobs();
       break;
     case 'markJobDone':
       result = markJobDone(e.parameter.job_id, e.parameter.result_status);
@@ -235,26 +235,57 @@ function getPendingJobs() {
   const sheet = getScheduledJobsSheet();
   const data = sheet.getDataRange().getValues();
   const pendingJobs = [];
+  const debugLogs = [];
   
   const now = new Date();
-  const nowDate = Utilities.formatDate(now, Session.getScriptTimeZone(), "yyyy-MM-dd");
-  const nowTime = Utilities.formatDate(now, Session.getScriptTimeZone(), "HH:mm");
+  const TIMEZONE = "Asia/Bangkok"; // Force Bangkok Timezone
+  const nowDate = Utilities.formatDate(now, TIMEZONE, "yyyy-MM-dd");
+  const nowTime = Utilities.formatDate(now, TIMEZONE, "HH:mm");
+  
+  debugLogs.push(`Server Time: ${nowDate} ${nowTime}`);
   
   for (let i = 1; i < data.length; i++) {
     const status = data[i][8];
-    if (status !== "PENDING") continue;
+    if (status !== "PENDING") {
+      // debugLogs.push(`Row ${i+1}: Skipped (Status=${status})`);
+      continue;
+    }
     
-    const scheduledDate = data[i][2];
-    const scheduledTime = data[i][3];
+    let scheduledDate = data[i][2];
+    let scheduledTime = data[i][3];
     
-    // เช็คว่าถึงเวลาหรือยัง
-    if (scheduledDate < nowDate || (scheduledDate === nowDate && scheduledTime <= nowTime)) {
+    // Original values for debug
+    const rawDate = scheduledDate;
+    const rawTime = scheduledTime;
+    
+    // Convert Date objects to strings
+    if (scheduledDate instanceof Date) {
+      scheduledDate = Utilities.formatDate(scheduledDate, TIMEZONE, "yyyy-MM-dd");
+    }
+    
+    if (scheduledTime instanceof Date) {
+      scheduledTime = Utilities.formatDate(scheduledTime, TIMEZONE, "HH:mm");
+    } else {
+       scheduledTime = String(scheduledTime).substring(0, 5); 
+    }
+    
+    const isDue = (scheduledDate < nowDate || (scheduledDate === nowDate && scheduledTime <= nowTime));
+    
+    debugLogs.push(`Row ${i+1}: Due=${isDue} | Sch=${scheduledDate} ${scheduledTime} | Now=${nowDate} ${nowTime} | RawTimeType=${typeof rawTime}`);
+
+    if (isDue) {
+      // Format booking_date if it's a Date object
+      let bookingDate = data[i][4];
+      if (bookingDate instanceof Date) {
+        bookingDate = Utilities.formatDate(bookingDate, TIMEZONE, "yyyy-MM-dd");
+      }
+      
       pendingJobs.push({
         job_id: data[i][0],
-        row_index: i + 1,  // 1-indexed for sheet operations
+        row_index: i + 1,
         scheduled_date: scheduledDate,
         scheduled_time: scheduledTime,
-        booking_date: data[i][4],
+        booking_date: bookingDate,
         duty: data[i][5],
         name: data[i][6],
         channel_id: data[i][7]
@@ -262,7 +293,7 @@ function getPendingJobs() {
     }
   }
   
-  return pendingJobs;
+  return { jobs: pendingJobs, debug_logs: debugLogs };
 }
 
 /**

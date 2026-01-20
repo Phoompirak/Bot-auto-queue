@@ -32,15 +32,35 @@ def call_apps_script(action, params=None):
         print("⚠️ APPS_SCRIPT_URL not set in .env")
         return {"error": "APPS_SCRIPT_URL not configured"}
     
+    print(f"\n🚀 [API CALL] Action: {action}")
     try:
         url = f"{APPS_SCRIPT_URL}?action={action}"
         if params:
             for key, value in params.items():
                 url += f"&{urllib.parse.quote(key)}={urllib.parse.quote(str(value))}"
         
+        print(f"🔗 URL: {url}")
+        if params:
+            print(f"📦 Params: {params}")
+        
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=30) as response:
-            return json.loads(response.read().decode('utf-8'))
+            raw_data = response.read().decode('utf-8')
+            print(f"📥 Response Status: {response.status}")
+            print(f"📄 Raw Body: {raw_data[:500]}...") # Print first 500 chars
+            
+            try:
+                json_data = json.loads(raw_data)
+                print(f"✅ Parsed JSON: {json_data}")
+                return json_data
+            except json.JSONDecodeError as e:
+                print(f"❌ JSON Decode Error: {e}")
+                print(f"☢️  Content causing error: {raw_data}")
+                return {"error": "Invalid JSON response", "raw_content": raw_data}
+                
+    except urllib.error.HTTPError as e:
+        print(f"❌ HTTP Error {e.code}: {e.reason}")
+        return {"error": f"HTTP {e.code}"}
     except Exception as e:
         print(f"⚠️ Apps Script call failed: {e}")
         return {"error": str(e)}
@@ -104,6 +124,11 @@ async def execute_pending_jobs():
     # ดึง jobs ที่ถึงเวลาจาก Google Sheets
     result = call_apps_script('getPendingJobs')
     jobs = result.get('jobs', [])
+    
+    # Print Debug Logs from Apps Script
+    debug_logs = result.get('debug_logs', [])
+    if debug_logs:
+        print(f"🐛 [Apps Script Debug] {' | '.join(debug_logs)}")
     
     if not jobs:
         print("✅ No pending jobs")
@@ -235,6 +260,9 @@ async def help_queue(interaction: discord.Interaction):
     app_commands.Choice(name="ลบกระดานปิดหน้าต่าง", value="ลบกระดานปิดหน้าต่าง")
 ])
 async def queue(interaction: discord.Interaction, time_str: str, date_str: str = None, duty_select: app_commands.Choice[str] = None, name_input: str = None):
+    # Defer interaction เพื่อป้องกัน timeout (3 วินาที)
+    await interaction.response.defer()
+    
     try:
         # ใช้เวลาไทย (UTC+7)
         now = datetime.datetime.now(THAI_TZ)
@@ -271,7 +299,7 @@ async def queue(interaction: discord.Interaction, time_str: str, date_str: str =
                 booking_date = booking_date_obj.strftime("%Y-%m-%d")
                 date_note = "(ระบุเอง)"
             except:
-                await interaction.response.send_message("❌ รูปแบบวันที่ไม่ถูกต้อง! กรุณาใช้ dd/mm/yy (เช่น 21/01/69)", ephemeral=True)
+                await interaction.followup.send("❌ รูปแบบวันที่ไม่ถูกต้อง! กรุณาใช้ dd/mm/yy (เช่น 21/01/69)", ephemeral=True)
                 return
         else:
             booking_date = scheduled_date
@@ -295,7 +323,7 @@ async def queue(interaction: discord.Interaction, time_str: str, date_str: str =
         })
         
         if not result.get('success'):
-            await interaction.response.send_message(f"❌ บันทึกคิวไม่สำเร็จ: {result.get('message', 'Unknown error')}", ephemeral=True)
+            await interaction.followup.send(f"❌ บันทึกคิวไม่สำเร็จ: {result.get('message', 'Unknown error')}", ephemeral=True)
             return
         
         job_id = result.get('job_id', 'N/A')
@@ -312,23 +340,41 @@ async def queue(interaction: discord.Interaction, time_str: str, date_str: str =
         embed.add_field(name="✍️ ชื่อ", value=final_name, inline=True)
         embed.set_footer(text="💡 คิวนี้จะไม่หายแม้บอท restart!")
         
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
+        
+        # Calculate wait time and schedule job execution
+        now = datetime.datetime.now(THAI_TZ)
+        wait_seconds = (target_datetime - now).total_seconds()
+        
+        if wait_seconds > 0:
+            print(f"⏰ Job scheduled. Will execute in {wait_seconds:.0f} seconds...")
+            async def delayed_job_check():
+                await asyncio.sleep(wait_seconds + 5)  # Add 5s buffer
+                print("⚡ Time reached! Triggering job check...")
+                await execute_pending_jobs()
+            bot.loop.create_task(delayed_job_check())
+        else:
+            # Already past time, execute immediately
+            print("⚡ Triggering immediate job check...")
+            bot.loop.create_task(execute_pending_jobs())
 
     except ValueError:
-        await interaction.response.send_message("❌ รูปแบบเวลาไม่ถูกต้อง! กรุณาใช้ HH:MM (เช่น 08:00)", ephemeral=True)
+        await interaction.followup.send("❌ รูปแบบเวลาไม่ถูกต้อง! กรุณาใช้ HH:MM (เช่น 08:00)", ephemeral=True)
     except Exception as e:
         try:
-            await interaction.response.send_message(f"❌ เกิดข้อผิดพลาด: {str(e)}", ephemeral=True)
+            await interaction.followup.send(f"❌ เกิดข้อผิดพลาด: {str(e)}", ephemeral=True)
         except:
             print(f"❌ Error: {e}")
 
 @bot.tree.command(name="list-jobs", description="ดูรายการคิวที่รอทำ")
 async def list_jobs(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
     result = call_apps_script('getPendingJobs')
     jobs = result.get('jobs', [])
     
     if not jobs:
-        await interaction.response.send_message("📭 ไม่มีคิวที่รอทำ", ephemeral=True)
+        await interaction.followup.send("📭 ไม่มีคิวที่รอทำ", ephemeral=True)
         return
     
     embed = discord.Embed(
@@ -343,17 +389,19 @@ async def list_jobs(interaction: discord.Interaction):
             inline=False
         )
     
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="cancel-job", description="ยกเลิกคิว")
 @app_commands.describe(job_id="Job ID ที่ต้องการยกเลิก")
 async def cancel_job(interaction: discord.Interaction, job_id: str):
+    await interaction.response.defer()
+    
     result = call_apps_script('cancelJob', {'job_id': job_id})
     
     if result.get('success'):
-        await interaction.response.send_message(f"✅ ยกเลิกคิว `{job_id}` สำเร็จ!")
+        await interaction.followup.send(f"✅ ยกเลิกคิว `{job_id}` สำเร็จ!")
     else:
-        await interaction.response.send_message(f"❌ ยกเลิกไม่สำเร็จ: {result.get('message')}", ephemeral=True)
+        await interaction.followup.send(f"❌ ยกเลิกไม่สำเร็จ: {result.get('message')}", ephemeral=True)
 
 # ==========================================
 # Main
