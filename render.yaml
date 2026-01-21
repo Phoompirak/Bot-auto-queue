@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: bot-auto-queue
+    env: python
+    buildCommand: "./build.sh"
+    startCommand: "python discord_bot.py"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.0

@@ -58,6 +58,19 @@ def run_bot(url=None, date=None, duty=None, name=None, callback=None):
     # Setup Chrome Driver
     options = webdriver.ChromeOptions()
     options.add_experimental_option("detach", True)
+    
+    # Check if running on Render (or any Linux environment with CHROME_BIN set)
+    chrome_bin = os.environ.get("CHROME_BIN")
+    if chrome_bin:
+        options.binary_location = chrome_bin
+        options.add_argument("--headless=new") # Must use headless on Render
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        log("☁️ Running on Render/Linux mode")
+    else:
+        # Local mode (optional: keep headless off to see browser)
+        # options.add_argument("--headless=new") 
+        log("💻 Running on Local mode")
     options.add_experimental_option("excludeSwitches", ['enable-automation'])
     options.add_argument("--headless") # Render ต้องใช้ Headless Mode
     options.add_argument("--no-sandbox")
