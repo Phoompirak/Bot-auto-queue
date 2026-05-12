@@ -1,0 +1,27 @@
+name: Auto Booking 05:00
+
+on:
+  schedule:
+    - cron: '0 22 * * *'  # 05:00 Bangkok (UTC+7 = UTC 22:00 วันก่อน)
+  workflow_dispatch:        # กดรันมือได้จาก GitHub UI
+
+jobs:
+  run-booking:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pending jobs
+        env:
+          APPS_SCRIPT_URL: ${{ secrets.APPS_SCRIPT_URL }}
+          TARGET_URL: ${{ secrets.TARGET_URL }}
+          CHROME_BIN: /usr/bin/google-chrome
+        run: python run_pending_jobs.py
