@@ -1,0 +1,15 @@
+[Unit]
+Description=Discord Bot Auto Queue
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Bot-auto-queue
+ExecStart=/home/ubuntu/Bot-auto-queue/venv/bin/python discord_bot.py
+Restart=always
+RestartSec=10
+EnvironmentFile=/home/ubuntu/Bot-auto-queue/.env
+
+[Install]
+WantedBy=multi-user.target

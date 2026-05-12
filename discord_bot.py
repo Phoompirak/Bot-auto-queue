@@ -4,18 +4,15 @@ from discord.ext import commands, tasks
 import datetime
 import asyncio
 import os
-import threading
 import json
 import urllib.request
 import urllib.parse
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 # โหลด Config จากไฟล์ .env
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
-PORT = int(os.getenv('PORT', 10000))
 APPS_SCRIPT_URL = os.getenv('APPS_SCRIPT_URL', '')  # URL ของ Google Apps Script
 
 # ==========================================
@@ -81,38 +78,6 @@ class MyBot(commands.Bot):
         print(f"✅ Synced slash commands for {self.user}")
 
 bot = MyBot()
-
-# ==========================================
-# HTTP Server with /check-jobs endpoint
-# ==========================================
-class SchedulerHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/check-jobs':
-            # เช็คและรัน jobs ที่ถึงเวลา
-            result = asyncio.run_coroutine_threadsafe(
-                execute_pending_jobs(), 
-                bot.loop
-            ).result(timeout=300)
-            
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
-        else:
-            # Health check
-            self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b'Discord Bot is running!')
-    
-    def log_message(self, format, *args):
-        print(f"🌐 HTTP: {args[0]}")
-
-def run_http_server():
-    server = HTTPServer(('0.0.0.0', PORT), SchedulerHandler)
-    print(f"🌐 HTTP server running on port {PORT}")
-    print(f"📡 Endpoints: / (health), /check-jobs (scheduler)")
-    server.serve_forever()
 
 # ==========================================
 # Job Execution Logic
@@ -414,9 +379,4 @@ if __name__ == "__main__":
         print("⚠️ Warning: ไม่พบ APPS_SCRIPT_URL ในไฟล์ .env!")
         print("กรุณาใส่ URL ของ Google Apps Script")
     else:
-        # เริ่ม HTTP server ใน background thread
-        http_thread = threading.Thread(target=run_http_server, daemon=True)
-        http_thread.start()
-        
-        # รัน Discord bot
         bot.run(TOKEN)

@@ -1,0 +1,10 @@
+.env
+.git
+node_modules
+web_for_test
+screenshots
+__pycache__
+*.ipynb
+*.md
+bot.service
+setup.sh

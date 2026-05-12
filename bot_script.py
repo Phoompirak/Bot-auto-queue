@@ -54,27 +54,50 @@ def run_bot(url=None, date=None, duty=None, name=None, callback=None):
     log("=" * 50)
     
     log("[STEP 1/6] Setting up Chrome Driver...")
-    
-    # Setup Chrome Driver
+
     options = webdriver.ChromeOptions()
-    options.add_experimental_option("detach", True)
-    
-    # Check if running on Render (or any Linux environment with CHROME_BIN set)
+
     chrome_bin = os.environ.get("CHROME_BIN")
     if chrome_bin:
         options.binary_location = chrome_bin
-        options.add_argument("--headless=new") # Must use headless on Render
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        log("☁️ Running on Render/Linux mode")
+        log("☁️ Running on Linux mode (CHROME_BIN set)")
     else:
-        # Local mode (optional: keep headless off to see browser)
-        # options.add_argument("--headless=new") 
         log("💻 Running on Local mode")
-    options.add_experimental_option("excludeSwitches", ['enable-automation'])
-    options.add_argument("--headless") # Render ต้องใช้ Headless Mode
+
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--mute-audio")
+
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-plugins")
+    options.add_argument("--disable-default-apps")
+    options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-background-timer-throttling")
+    options.add_argument("--disable-renderer-backgrounding")
+    options.add_argument("--disable-sync")
+    options.add_argument("--disable-translate")
+    options.add_argument("--disable-component-update")
+    options.add_argument("--disable-client-side-phishing-detection")
+    options.add_argument("--metrics-recording-only")
+    options.add_argument("--no-first-run")
+    options.add_argument("--safebrowsing-disable-auto-update")
+
+    options.add_argument("--blink-settings=imagesEnabled=false")
+    options.add_argument("--js-flags=--max-old-space-size=128")
+
+    options.add_argument("--window-size=1280,720")
+
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("prefs", {
+        "profile.managed_default_content_settings.images": 2,
+        "profile.default_content_setting_values.notifications": 2,
+    })
+
+    options.page_load_strategy = "eager"
     
     try:
         driver = webdriver.Chrome(options=options)
@@ -91,7 +114,6 @@ def run_bot(url=None, date=None, duty=None, name=None, callback=None):
         print(f"[STEP 2/6] Opening URL: {url}")
         driver.get(url)
         driver.execute_script("document.body.style.zoom='70%'")
-        time.sleep(DELAY_SECONDS)
         print("[STEP 2/6] ✅ Page loaded")
         
         # ส่วน iframe (สำหรับ Google Apps Script)
@@ -203,40 +225,27 @@ def run_bot(url=None, date=None, duty=None, name=None, callback=None):
         log("=" * 50)
         log("🏁 BOT SCRIPT FINISHED")
         log("=" * 50)
-        time.sleep(2)
+        time.sleep(0.5)
         try:
             driver.quit()
         except:
             pass
 
 def capture_full_page_screenshot(driver, log_func, prefix="booking"):
-    """ฟังก์ชันช่วยถ่าย Screenshot แบบ Full Page"""
+    """ถ่าย Screenshot แบบ viewport (ไม่ resize window เพื่อประหยัด RAM)"""
     try:
-        # ถ้า prefix คือ booking (สำเร็จ) ให้ refresh และรอ
         if prefix == "booking":
             time.sleep(1)
             driver.refresh()
-            log_func("[SCREENSHOT] Waiting 5 seconds for page load...")
-            time.sleep(5)
-        
-        # คำนวณขนาดหน้าเว็บเต็ม แล้วขยาย Window ให้พอดี
-        total_width = driver.execute_script("return document.body.scrollWidth")
-        total_height = driver.execute_script("return document.body.scrollHeight")
-        
-        # กำหนดขนาดหน้าต่างให้ครอบคลุมทั้งหน้า
-        driver.set_window_size(max(total_width, 1200), total_height + 200)
-        time.sleep(1)
-        
-        # Scroll ไปบนสุด
+            log_func("[SCREENSHOT] Waiting 3s for page load...")
+            time.sleep(3)
+
         driver.execute_script("window.scrollTo(0, 0)")
-        time.sleep(0.5)
-        
-        # สร้าง screenshots folder
+        time.sleep(0.3)
+
         screenshots_dir = os.path.join(os.path.dirname(__file__), "screenshots")
-        if not os.path.exists(screenshots_dir):
-            os.makedirs(screenshots_dir)
-        
-        # บันทึก Screenshot
+        os.makedirs(screenshots_dir, exist_ok=True)
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         screenshot_path = os.path.join(screenshots_dir, f"{prefix}_{timestamp}.png")
         driver.save_screenshot(screenshot_path)
