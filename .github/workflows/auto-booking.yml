@@ -1,8 +1,8 @@
-name: Auto Booking 05:00
+name: Auto Booking 04:00
 
 on:
   schedule:
-    - cron: '0 22 * * *'  # 05:00 Bangkok (UTC+7 = UTC 22:00 วันก่อน)
+    - cron: '0 21 * * *'  # 04:00 Bangkok (UTC+7 = UTC 21:00 วันก่อน)
   workflow_dispatch:        # กดรันมือได้จาก GitHub UI
 
 jobs:
